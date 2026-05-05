@@ -1,0 +1,68 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import Game from "../components/Game";
+import { setBanner } from "../components/storage";
+import { fetchGame, postJson } from "../api";
+
+export default function SoloPage() {
+  const { gameId } = useParams();
+  const navigate = useNavigate();
+  const [game, setGame] = useState(null);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await fetchGame(gameId);
+      if (cancelled) return;
+      if (!data) {
+        setBanner("That game doesn't exist.");
+        navigate("/", { replace: true });
+        return;
+      }
+      if (data.mode !== "solo") {
+        // Multi game opened via the solo URL — punt to the multi route.
+        navigate(`/g/${gameId}`, { replace: true });
+        return;
+      }
+      setGame(data);
+    })().catch((e) => setLoadError(e.message));
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, navigate]);
+
+  async function handleNewBoard() {
+    try {
+      // Carry over the previous game's timer config to avoid surprising
+      // the player with a different mode.
+      const data = await postJson("/api/games", {
+        timerMode: game?.timerMode || "up",
+        countdownSeconds: game?.countdownSeconds || 0,
+      });
+      navigate(`/p/${data.gameId}`, { replace: true });
+    } catch (e) {
+      setLoadError(e.message);
+    }
+  }
+
+  function handleResetSetup() {
+    // Don't clear saved state — resume from the home page should still work.
+    navigate("/");
+  }
+
+  if (loadError) {
+    return <div className="App-loading">Error: {loadError}</div>;
+  }
+  if (!game) {
+    return <div className="App-loading">Loading game…</div>;
+  }
+  return (
+    <Game
+      key={game.gameId}
+      game={game}
+      onNewGame={handleNewBoard}
+      onResetSetup={handleResetSetup}
+    />
+  );
+}

@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test / coverage output
+coverage/
+
+# Vite caches
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local env
+.env
+.env.local
+.env.*.local
+CLAUDE.md
+.claude
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
