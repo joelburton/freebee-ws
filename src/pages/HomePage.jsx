@@ -205,7 +205,7 @@ export default function HomePage() {
             className={`App-tab${activeTab === "solo" ? " is-active" : ""}`}
             onClick={() => setActiveTab("solo")}
           >
-            Play solo
+            Solo
           </button>
           <button
             type="button"
@@ -217,7 +217,7 @@ export default function HomePage() {
             className={`App-tab${activeTab === "multi" ? " is-active" : ""}`}
             onClick={() => setActiveTab("multi")}
           >
-            Play with friends
+            With friends
           </button>
         </div>
         <div
@@ -388,6 +388,10 @@ function TimerControls({
   countdown,
   onCountdownChange,
 }) {
+  // Timer-mode is an infrequent setup choice; keep these fields out of the
+  // tab order so Tab from "Name" lands on a Go button rather than silently
+  // switching timer mode via the countdown input's onFocus handler. They
+  // remain reachable by click.
   return (
     <fieldset className="App-start-timer">
       <legend>Timer</legend>
@@ -397,6 +401,7 @@ function TimerControls({
           name={radioGroup}
           checked={mode === "none"}
           onChange={() => onModeChange("none")}
+          tabIndex={-1}
         />
         No timer
       </label>
@@ -406,6 +411,7 @@ function TimerControls({
           name={radioGroup}
           checked={mode === "up"}
           onChange={() => onModeChange("up")}
+          tabIndex={-1}
         />
         Count up
       </label>
@@ -415,6 +421,7 @@ function TimerControls({
           name={radioGroup}
           checked={mode === "down"}
           onChange={() => onModeChange("down")}
+          tabIndex={-1}
         />
         Countdown
         <input
@@ -426,6 +433,7 @@ function TimerControls({
           placeholder="M:SS"
           size={5}
           aria-label="Countdown duration"
+          tabIndex={-1}
         />
       </label>
     </fieldset>
