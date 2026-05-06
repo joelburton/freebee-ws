@@ -947,6 +947,73 @@ code {
 /* Note: .is-offline opacity on .Game-roster-player is grouped with the
    lobby version in §6 since the rule applies to both. */
 
+/* ---------- Compete: leaderboard + winner banner ----------
+   Replaces the simple .Game-roster in compete mode. Each row shows
+   the player's color dot, name, "you"/"winner" tags, and their
+   live score + word count. Sorted by score by the parent. */
+
+.Game-leaderboard {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.Game-leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.Game-leaderboard-row.is-offline {
+  opacity: 0.45;
+}
+
+.Game-leaderboard-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.Game-leaderboard-score {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.Game-leaderboard-count {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.Game-roster-tag-winner {
+  background: var(--accent);
+  color: #111;
+}
+
+/* Banner shown above the rank bar at end of compete play, naming the
+   winner. Plays the same role as a "Time's up!" ribbon. */
+.Game-winner {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff8e1;
+  border: 1px solid var(--accent-border);
+  font-size: 14px;
+  text-align: center;
+}
+
+.Game-winner-name {
+  font-weight: 800;
+}
+
 /* ---------- Rank bar ---------- */
 
 .RankBar {

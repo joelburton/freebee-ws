@@ -49,10 +49,16 @@ export default function Game({
   const [paused, setPaused] = useState(game.paused || false);
   const [serverElapsed, setServerElapsed] = useState(game.elapsed || 0);
   const [revealList, setRevealList] = useState(game.revealList || null);
-  // Multi-only: roster of players + word→playerId attribution. Solo
-  // games leave these empty and skip the roster UI / word coloring.
+  // Multiplayer-only: roster of players + word→playerId attribution.
+  // Solo games leave these empty and skip the roster / coloring UI.
   const [players, setPlayers] = useState(game.players || []);
   const [foundBy, setFoundBy] = useState(game.foundBy || {});
+  // Compete-only: who won (set when the game ends), and the per-viewer
+  // "what others found that I didn't" map (set on the post-end view).
+  const [winnerId, setWinnerId] = useState(game.winnerId || null);
+  const [missedByMe, setMissedByMe] = useState(game.missedByMe || null);
+  const mode = game.mode || "solo";
+  const isCompete = mode === "compete";
   // Chat backlog (multi only).
   const [messages, setMessages] = useState(game.messages || []);
   const [submitFeedback, setSubmitFeedback] = useState(EMPTY_FEEDBACK);
@@ -96,18 +102,62 @@ export default function Game({
   const [wordListOpen, setWordListOpen] = useState(false);
 
   const bonusSet = useMemo(() => new Set(bonusFound), [bonusFound]);
-  // word → hex color, derived from foundBy + the player roster. Empty in
-  // solo since foundBy is empty.
+  const myColor = useMemo(
+    () => players.find((p) => p.playerId === playerId)?.color || null,
+    [players, playerId],
+  );
+  // word → hex color attribution for the WordList. Co-op derives from
+  // session.foundBy. Compete during play colors the viewer's own finds
+  // in their own color (so the recently-added underline picks them up);
+  // post-end it switches to the missedByMe map so others' finds appear
+  // in the finder's color in the "what I missed" list.
   const wordColors = useMemo(() => {
     if (!players.length) return null;
     const byId = new Map(players.map((p) => [p.playerId, p.color]));
+    if (mode === "compete") {
+      if (ended && missedByMe) {
+        const out = {};
+        for (const [w, pid] of Object.entries(missedByMe)) {
+          const c = byId.get(pid);
+          if (c) out[w] = c;
+        }
+        return out;
+      }
+      if (myColor) {
+        const out = {};
+        for (const w of found) out[w] = myColor;
+        return out;
+      }
+      return null;
+    }
     const out = {};
     for (const w of Object.keys(foundBy)) {
       const c = byId.get(foundBy[w]);
       if (c) out[w] = c;
     }
     return out;
-  }, [players, foundBy]);
+  }, [players, foundBy, mode, ended, missedByMe, myColor, found]);
+
+  // Compete post-end the WordList shows "what I missed": others' finds
+  // in finder color, plus unfound (nobody-found) words in grey, *not*
+  // the viewer's own finds. Solo and co-op use found+revealList as
+  // before.
+  const myFoundSet = useMemo(() => new Set(found), [found]);
+  const compeMissedFinds = useMemo(
+    () => (missedByMe ? Object.keys(missedByMe) : []),
+    [missedByMe],
+  );
+  const wordListFound = isCompete && ended ? compeMissedFinds : found;
+  const wordListAll =
+    isCompete && ended && revealList
+      ? revealList.filter((w) => !myFoundSet.has(w))
+      : revealList;
+  const wordListBonusSet = useMemo(() => {
+    if (!(isCompete && ended)) return bonusSet;
+    if (!revealList) return new Set();
+    const revealSet = new Set(revealList);
+    return new Set(compeMissedFinds.filter((w) => !revealSet.has(w)));
+  }, [isCompete, ended, bonusSet, revealList, compeMissedFinds]);
   const allowedUpper = useMemo(
     () =>
       new Set(
@@ -220,6 +270,9 @@ export default function Game({
       setFoundBy(data.foundBy);
     }
     if (Array.isArray(data.messages)) setMessages(data.messages);
+    // Compete only — winnerId on end, missedByMe on the post-end view.
+    if (data.winnerId !== undefined) setWinnerId(data.winnerId || null);
+    if (data.missedByMe !== undefined) setMissedByMe(data.missedByMe);
     // Multi: server creates a successor session when someone clicks
     // "New board" on the ended game. Surface that to the parent loader
     // so every connected player can be brought forward.
@@ -426,22 +479,33 @@ export default function Game({
         </form>
       </div>
       <aside className="Game-side">
-        {players.length > 0 && (
-          <ul className="Game-roster" aria-label="Players">
-            {players.map((p) => (
-              <li
-                key={p.playerId}
-                className={`Game-roster-player${p.online === false ? " is-offline" : ""}`}
-                style={{ "--player-color": p.color }}
-              >
-                <span className="Game-roster-dot" aria-hidden="true" />
-                <span className="Game-roster-name">{p.name}</span>
-                {p.playerId === playerId && (
-                  <span className="Game-roster-tag">you</span>
-                )}
-              </li>
-            ))}
-          </ul>
+        {isCompete && players.length > 0 ? (
+          <Leaderboard
+            players={players}
+            playerId={playerId}
+            winnerId={displayEnded ? winnerId : null}
+          />
+        ) : (
+          players.length > 0 && (
+            <ul className="Game-roster" aria-label="Players">
+              {players.map((p) => (
+                <li
+                  key={p.playerId}
+                  className={`Game-roster-player${p.online === false ? " is-offline" : ""}`}
+                  style={{ "--player-color": p.color }}
+                >
+                  <span className="Game-roster-dot" aria-hidden="true" />
+                  <span className="Game-roster-name">{p.name}</span>
+                  {p.playerId === playerId && (
+                    <span className="Game-roster-tag">you</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+        {isCompete && displayEnded && winnerId && (
+          <WinnerBanner players={players} winnerId={winnerId} />
         )}
         <RankBar score={score} total={game.total} />
         <div className="Game-stats">
@@ -492,11 +556,14 @@ export default function Game({
             ×
           </button>
           <WordList
-            found={found}
-            all={displayEnded ? revealList : null}
-            bonusSet={bonusSet}
+            found={wordListFound}
+            all={displayEnded ? wordListAll : null}
+            bonusSet={wordListBonusSet}
             wordColors={wordColors}
-            recentlyFound={recentlyFound}
+            // Underlines only matter while you're playing — post-end is
+            // a quiet review. Compete during play still gets them on
+            // the viewer's own newly-added words.
+            recentlyFound={displayEnded ? null : recentlyFound}
             showNav={false}
             onPagination={setWordPagination}
           />
@@ -590,6 +657,56 @@ export default function Game({
           onTabAway={() => inputRef.current?.focus()}
         />
       )}
+    </div>
+  );
+}
+
+// Compete leaderboard — sorted by score desc, with each player's name,
+// score and word count. The viewer is tagged "you" and the winner
+// (post-end only) gets a "winner" tag for a high-contrast cue beyond
+// the banner above the rank bar.
+function Leaderboard({ players, playerId, winnerId }) {
+  const sorted = [...players].sort((a, b) => b.score - a.score);
+  return (
+    <ol className="Game-leaderboard" aria-label="Leaderboard">
+      {sorted.map((p) => (
+        <li
+          key={p.playerId}
+          className={`Game-leaderboard-row${
+            p.online === false ? " is-offline" : ""
+          }${p.playerId === winnerId ? " is-winner" : ""}`}
+          style={{ "--player-color": p.color }}
+        >
+          <span className="Game-roster-dot" aria-hidden="true" />
+          <span className="Game-leaderboard-name">{p.name}</span>
+          {p.playerId === playerId && (
+            <span className="Game-roster-tag">you</span>
+          )}
+          {p.playerId === winnerId && (
+            <span className="Game-roster-tag Game-roster-tag-winner">
+              winner
+            </span>
+          )}
+          <span className="Game-leaderboard-score">{p.score}</span>
+          <span className="Game-leaderboard-count">/ {p.foundCount}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function WinnerBanner({ players, winnerId }) {
+  const winner = players.find((p) => p.playerId === winnerId);
+  if (!winner) return null;
+  return (
+    <div className="Game-winner" role="status" aria-live="polite">
+      <span
+        className="Game-winner-name"
+        style={{ color: winner.color }}
+      >
+        {winner.name}
+      </span>{" "}
+      wins!
     </div>
   );
 }

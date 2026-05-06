@@ -640,6 +640,97 @@ describe("Game interactions", () => {
     expect(input.closest("form")).not.toHaveClass("is-blurred");
   });
 
+  describe("compete mode", () => {
+    const competeBase = {
+      ...mockGame,
+      mode: "compete",
+      players: [
+        { playerId: "p-host", name: "Joel", color: "#1976d2", online: true,
+          score: 5, foundCount: 1 },
+        { playerId: "p-buddy", name: "Buddy", color: "#e64a19", online: true,
+          score: 12, foundCount: 2 },
+      ],
+    };
+
+    it("renders the leaderboard sorted by score with name + score + count", () => {
+      mockServer();
+      render(
+        <Game
+          game={competeBase}
+          playerId="p-host"
+          onNewGame={() => {}}
+          onResetSetup={() => {}}
+        />,
+      );
+      const list = screen.getByRole("list", { name: "Leaderboard" });
+      const rows = list.querySelectorAll("li");
+      // Buddy's score 12 > Joel's 5, so Buddy first.
+      expect(rows[0]).toHaveTextContent("Buddy");
+      expect(rows[0]).toHaveTextContent("12");
+      expect(rows[1]).toHaveTextContent("Joel");
+      expect(rows[1]).toHaveTextContent("5");
+    });
+
+    it("post-end: shows winner banner naming the winner", () => {
+      mockServer();
+      render(
+        <Game
+          game={{
+            ...competeBase,
+            ended: true,
+            winnerId: "p-buddy",
+            revealList: ["tribe", "rebind", "trident"],
+            missedByMe: { rebind: "p-buddy", trident: "p-buddy" },
+            found: ["tribe"],
+          }}
+          playerId="p-host"
+          onNewGame={() => {}}
+          onResetSetup={() => {}}
+        />,
+      );
+      const banner = screen.getByRole("status");
+      expect(banner).toHaveTextContent("Buddy");
+      expect(banner).toHaveTextContent("wins");
+    });
+
+    it("post-end wordlist excludes the viewer's own finds and shows others' finds + unfound", () => {
+      mockServer();
+      const { container } = render(
+        <Game
+          game={{
+            ...competeBase,
+            ended: true,
+            winnerId: "p-buddy",
+            revealList: ["tribe", "rebind", "trident", "interbred"],
+            missedByMe: { rebind: "p-buddy", trident: "p-buddy" },
+            found: ["tribe"],
+          }}
+          playerId="p-host"
+          onNewGame={() => {}}
+          onResetSetup={() => {}}
+        />,
+      );
+      const items = Array.from(
+        container.querySelectorAll(".WordList li"),
+      );
+      const texts = items.map((li) => li.textContent);
+      // "tribe" (host's own find) is excluded entirely.
+      expect(texts).not.toContain("tribe");
+      // Buddy's finds appear (colored — text color is the finder color).
+      expect(texts).toContain("rebind");
+      expect(texts).toContain("trident");
+      // Word nobody found shows as unfound.
+      const interbred = items.find((li) =>
+        li.textContent.startsWith("interbred"),
+      );
+      expect(interbred.classList.contains("WordList-unfound")).toBe(true);
+      const rebind = items.find((li) =>
+        li.textContent.startsWith("rebind"),
+      );
+      expect(rebind.classList.contains("WordList-unfound")).toBe(false);
+    });
+  });
+
   it("Pause click POSTs /pause and applies the response", async () => {
     mockServer({
       pause: { paused: true, elapsed: 42, ended: false },

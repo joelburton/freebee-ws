@@ -8,6 +8,11 @@ import {
 } from "../components/storage";
 import { fetchGame, parseTime, postJson } from "../api";
 
+// Default first-to-rank target. 6 = "Genius" (top of the RANKS array
+// in shared/ranks.js). Kept in sync there; if the array changes, also
+// update the EndCondition <select> options below.
+const DEFAULT_TARGET_RANK = 6;
+
 export default function HomePage() {
   const navigate = useNavigate();
   const [error, setError] = useState("");
@@ -20,16 +25,30 @@ export default function HomePage() {
   const [timerMode, setTimerMode] = useState("none");
   const [countdownInput, setCountdownInput] = useState("5:00");
 
-  // Multi card state.
+  // Multiplayer (co-op + compete) shares the player-name input — same
+  // concept, no point making the user type their name twice.
   const [nameInput, setNameInput] = useState("");
-  const [centerInputMulti, setCenterInputMulti] = useState("");
-  const [outerInputMulti, setOuterInputMulti] = useState("");
-  const [timerModeMulti, setTimerModeMulti] = useState("none");
-  const [countdownInputMulti, setCountdownInputMulti] = useState("5:00");
+
+  // Co-op card state.
+  const [centerInputCoop, setCenterInputCoop] = useState("");
+  const [outerInputCoop, setOuterInputCoop] = useState("");
+  const [timerModeCoop, setTimerModeCoop] = useState("none");
+  const [countdownInputCoop, setCountdownInputCoop] = useState("5:00");
+
+  // Compete card state. End condition is "down" (countdown) or "rank"
+  // (first-to-rank). `targetRankCompete` is an index into the RANKS
+  // array; only used when endMode is "rank".
+  const [centerInputCompete, setCenterInputCompete] = useState("");
+  const [outerInputCompete, setOuterInputCompete] = useState("");
+  const [endModeCompete, setEndModeCompete] = useState("rank");
+  const [countdownInputCompete, setCountdownInputCompete] = useState("5:00");
+  const [targetRankCompete, setTargetRankCompete] = useState(
+    DEFAULT_TARGET_RANK,
+  );
 
   // Resume card: validate the saved solo game still exists on the server.
   const [savedGame, setSavedGame] = useState(null);
-  // Mutually exclusive between solo and multi.
+  // Active tab: solo | coop | compete.
   const [activeTab, setActiveTab] = useState("solo");
 
   // One-shot banner from a redirect (e.g. /g/<bad>). Reading sessionStorage
@@ -50,8 +69,9 @@ export default function HomePage() {
         clearSavedState();
         return;
       }
-      // Multi saved-state lives behind /g/<id>; not a solo resume candidate.
-      if (data.mode === "multi") return;
+      // Multiplayer saved-state lives behind /g/<id>; not a solo
+      // resume candidate.
+      if (data.mode === "multi" || data.mode === "compete") return;
       setSavedGame(data);
     })();
     return () => {
@@ -100,12 +120,12 @@ export default function HomePage() {
     });
   }
 
-  async function startMulti(extra = {}) {
+  async function startCoop(extra = {}) {
     const cleanName = nameInput.trim();
     if (!cleanName) return;
     const countdownSeconds = ensureCountdown(
-      timerModeMulti,
-      countdownInputMulti,
+      timerModeCoop,
+      countdownInputCoop,
     );
     if (countdownSeconds === null) return;
     setBusy(true);
@@ -113,7 +133,7 @@ export default function HomePage() {
     try {
       const data = await postJson("/api/games", {
         playerName: cleanName,
-        timerMode: timerModeMulti,
+        timerMode: timerModeCoop,
         countdownSeconds,
         ...extra,
       });
@@ -125,15 +145,62 @@ export default function HomePage() {
     }
   }
 
-  function loadMultiRandom() {
-    return startMulti();
+  function loadCoopRandom() {
+    return startCoop();
   }
 
-  function loadMultiCustom(evt) {
+  function loadCoopCustom(evt) {
     evt.preventDefault();
-    return startMulti({
-      letters: outerInputMulti.toLowerCase(),
-      center: centerInputMulti.toLowerCase(),
+    return startCoop({
+      letters: outerInputCoop.toLowerCase(),
+      center: centerInputCoop.toLowerCase(),
+    });
+  }
+
+  async function startCompete(extra = {}) {
+    const cleanName = nameInput.trim();
+    if (!cleanName) return;
+    // Compete uses one of two end conditions; the body sent to the
+    // server differs accordingly.
+    const body = {
+      playerName: cleanName,
+      mode: "compete",
+      ...extra,
+    };
+    if (endModeCompete === "down") {
+      const countdownSeconds = ensureCountdown(
+        "down",
+        countdownInputCompete,
+      );
+      if (countdownSeconds === null) return;
+      body.timerMode = "down";
+      body.countdownSeconds = countdownSeconds;
+    } else {
+      // First-to-rank: count up so players still see elapsed time.
+      body.timerMode = "up";
+      body.targetRank = targetRankCompete;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const data = await postJson("/api/games", body);
+      saveState({ gameId: data.gameId, playerId: data.playerId });
+      navigate(`/g/${data.gameId}`);
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  }
+
+  function loadCompeteRandom() {
+    return startCompete();
+  }
+
+  function loadCompeteCustom(evt) {
+    evt.preventDefault();
+    return startCompete({
+      letters: outerInputCompete.toLowerCase(),
+      center: centerInputCompete.toLowerCase(),
     });
   }
 
@@ -195,38 +262,27 @@ export default function HomePage() {
 
       <section className="App-card App-card-tabbed">
         <div className="App-tabs" role="tablist" aria-label="New game">
-          <button
-            type="button"
-            role="tab"
-            id="tab-solo"
-            aria-selected={activeTab === "solo"}
-            aria-controls="new-game-panel"
-            tabIndex={activeTab === "solo" ? 0 : -1}
-            className={`App-tab${activeTab === "solo" ? " is-active" : ""}`}
-            onClick={() => setActiveTab("solo")}
-          >
+          <Tab id="tab-solo" active={activeTab === "solo"} onSelect={() => setActiveTab("solo")}>
             Solo
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id="tab-multi"
-            aria-selected={activeTab === "multi"}
-            aria-controls="new-game-panel"
-            tabIndex={activeTab === "multi" ? 0 : -1}
-            className={`App-tab${activeTab === "multi" ? " is-active" : ""}`}
-            onClick={() => setActiveTab("multi")}
+          </Tab>
+          <Tab id="tab-coop" active={activeTab === "coop"} onSelect={() => setActiveTab("coop")}>
+            Co-op
+          </Tab>
+          <Tab
+            id="tab-compete"
+            active={activeTab === "compete"}
+            onSelect={() => setActiveTab("compete")}
           >
-            With friends
-          </button>
+            Compete
+          </Tab>
         </div>
         <div
           id="new-game-panel"
           role="tabpanel"
-          aria-labelledby={activeTab === "solo" ? "tab-solo" : "tab-multi"}
+          aria-labelledby={`tab-${activeTab}`}
           className="App-card-body"
         >
-          {activeTab === "solo" ? (
+          {activeTab === "solo" && (
             <>
               <TimerControls
                 radioGroup="timerMode-solo"
@@ -246,131 +302,84 @@ export default function HomePage() {
                   Go
                 </button>
               </div>
-              <form
-                className="App-start-row App-start-custom"
+              <CustomLettersForm
+                center={centerInput}
+                onCenterChange={setCenterInput}
+                outer={outerInput}
+                onOuterChange={setOuterInput}
                 onSubmit={loadCustom}
-              >
-                <label className="App-start-field">
-                  <span>Center</span>
-                  <input
-                    value={centerInput}
-                    onChange={(e) =>
-                      setCenterInput(e.target.value.toUpperCase().slice(0, 1))
-                    }
-                    maxLength={1}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="A"
-                  />
-                </label>
-                <label className="App-start-field App-start-field-wide">
-                  <span>Outer</span>
-                  <input
-                    value={outerInput}
-                    onChange={(e) =>
-                      setOuterInput(e.target.value.toUpperCase().slice(0, 6))
-                    }
-                    maxLength={6}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="BCDEFG"
-                  />
-                </label>
-                <button
-                  type="submit"
-                  className="App-start-go"
-                  disabled={
-                    centerInput.length !== 1 || outerInput.length !== 6
-                  }
-                  aria-label="Start with chosen letters"
-                >
-                  Go
-                </button>
-              </form>
+                ariaLabel="Start with chosen letters"
+              />
             </>
-          ) : (
+          )}
+
+          {activeTab === "coop" && (
             <>
-              <label
-                className={`App-start-field App-start-field-wide${
-                  nameInput.trim() ? "" : " is-required-empty"
-                }`}
-              >
-                <span>Your name *</span>
-                <input
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value.slice(0, 32))}
-                  spellCheck={false}
-                  autoComplete="off"
-                  placeholder="Name"
-                  required
-                />
-              </label>
+              <NameField name={nameInput} onChange={setNameInput} />
               <TimerControls
-                radioGroup="timerMode-multi"
-                mode={timerModeMulti}
-                onModeChange={setTimerModeMulti}
-                countdown={countdownInputMulti}
-                onCountdownChange={setCountdownInputMulti}
+                radioGroup="timerMode-coop"
+                mode={timerModeCoop}
+                onModeChange={setTimerModeCoop}
+                countdown={countdownInputCoop}
+                onCountdownChange={setCountdownInputCoop}
               />
               <div className="App-start-row">
                 <span className="App-start-row-label">Random letters</span>
                 <button
                   type="button"
                   className="App-start-go"
-                  onClick={loadMultiRandom}
+                  onClick={loadCoopRandom}
                   disabled={!nameInput.trim()}
-                  aria-label="Start multiplayer with random letters"
+                  aria-label="Start co-op with random letters"
                 >
                   Go
                 </button>
               </div>
-              <form
-                className="App-start-row App-start-custom"
-                onSubmit={loadMultiCustom}
-              >
-                <label className="App-start-field">
-                  <span>Center</span>
-                  <input
-                    value={centerInputMulti}
-                    onChange={(e) =>
-                      setCenterInputMulti(
-                        e.target.value.toUpperCase().slice(0, 1),
-                      )
-                    }
-                    maxLength={1}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="A"
-                  />
-                </label>
-                <label className="App-start-field App-start-field-wide">
-                  <span>Outer</span>
-                  <input
-                    value={outerInputMulti}
-                    onChange={(e) =>
-                      setOuterInputMulti(
-                        e.target.value.toUpperCase().slice(0, 6),
-                      )
-                    }
-                    maxLength={6}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="BCDEFG"
-                  />
-                </label>
+              <CustomLettersForm
+                center={centerInputCoop}
+                onCenterChange={setCenterInputCoop}
+                outer={outerInputCoop}
+                onOuterChange={setOuterInputCoop}
+                onSubmit={loadCoopCustom}
+                disabled={!nameInput.trim()}
+                ariaLabel="Start co-op with chosen letters"
+              />
+            </>
+          )}
+
+          {activeTab === "compete" && (
+            <>
+              <NameField name={nameInput} onChange={setNameInput} />
+              <EndCondition
+                radioGroup="endMode-compete"
+                mode={endModeCompete}
+                onModeChange={setEndModeCompete}
+                countdown={countdownInputCompete}
+                onCountdownChange={setCountdownInputCompete}
+                targetRank={targetRankCompete}
+                onTargetRankChange={setTargetRankCompete}
+              />
+              <div className="App-start-row">
+                <span className="App-start-row-label">Random letters</span>
                 <button
-                  type="submit"
+                  type="button"
                   className="App-start-go"
-                  disabled={
-                    !nameInput.trim() ||
-                    centerInputMulti.length !== 1 ||
-                    outerInputMulti.length !== 6
-                  }
-                  aria-label="Start multiplayer with chosen letters"
+                  onClick={loadCompeteRandom}
+                  disabled={!nameInput.trim()}
+                  aria-label="Start compete with random letters"
                 >
                   Go
                 </button>
-              </form>
+              </div>
+              <CustomLettersForm
+                center={centerInputCompete}
+                onCenterChange={setCenterInputCompete}
+                outer={outerInputCompete}
+                onOuterChange={setOuterInputCompete}
+                onSubmit={loadCompeteCustom}
+                disabled={!nameInput.trim()}
+                ariaLabel="Start compete with chosen letters"
+              />
             </>
           )}
         </div>
@@ -378,6 +387,99 @@ export default function HomePage() {
 
       {error && <p className="App-start-error">{error}</p>}
     </div>
+  );
+}
+
+// One tab in the tablist. Pulled out because the three tabs are
+// otherwise identical except for label and active state.
+function Tab({ id, active, onSelect, children }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      id={id}
+      aria-selected={active}
+      aria-controls="new-game-panel"
+      tabIndex={active ? 0 : -1}
+      className={`App-tab${active ? " is-active" : ""}`}
+      onClick={onSelect}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Required name input shared by Co-op and Compete cards. Shows a red
+// label as a soft prompt while empty.
+function NameField({ name, onChange }) {
+  return (
+    <label
+      className={`App-start-field App-start-field-wide${
+        name.trim() ? "" : " is-required-empty"
+      }`}
+    >
+      <span>Your name *</span>
+      <input
+        value={name}
+        onChange={(e) => onChange(e.target.value.slice(0, 32))}
+        spellCheck={false}
+        autoComplete="off"
+        placeholder="Name"
+        required
+      />
+    </label>
+  );
+}
+
+// "Center + Outer + Go" form, shared by all three tabs. The parent
+// passes a submit handler that reads the inputs from its state.
+function CustomLettersForm({
+  center,
+  onCenterChange,
+  outer,
+  onOuterChange,
+  onSubmit,
+  disabled = false,
+  ariaLabel,
+}) {
+  const lettersOk = center.length === 1 && outer.length === 6;
+  return (
+    <form className="App-start-row App-start-custom" onSubmit={onSubmit}>
+      <label className="App-start-field">
+        <span>Center</span>
+        <input
+          value={center}
+          onChange={(e) =>
+            onCenterChange(e.target.value.toUpperCase().slice(0, 1))
+          }
+          maxLength={1}
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="A"
+        />
+      </label>
+      <label className="App-start-field App-start-field-wide">
+        <span>Outer</span>
+        <input
+          value={outer}
+          onChange={(e) =>
+            onOuterChange(e.target.value.toUpperCase().slice(0, 6))
+          }
+          maxLength={6}
+          spellCheck={false}
+          autoComplete="off"
+          placeholder="BCDEFG"
+        />
+      </label>
+      <button
+        type="submit"
+        className="App-start-go"
+        disabled={disabled || !lettersOk}
+        aria-label={ariaLabel}
+      >
+        Go
+      </button>
+    </form>
   );
 }
 
@@ -435,6 +537,69 @@ function TimerControls({
           aria-label="Countdown duration"
           tabIndex={-1}
         />
+      </label>
+    </fieldset>
+  );
+}
+
+// Compete-only end condition picker: countdown M:SS OR first to one of
+// the top three ranks. Same out-of-tab-order treatment as TimerControls.
+function EndCondition({
+  radioGroup,
+  mode,
+  onModeChange,
+  countdown,
+  onCountdownChange,
+  targetRank,
+  onTargetRankChange,
+}) {
+  return (
+    <fieldset className="App-start-timer">
+      <legend>End condition</legend>
+      <label>
+        <input
+          type="radio"
+          name={radioGroup}
+          checked={mode === "down"}
+          onChange={() => onModeChange("down")}
+          tabIndex={-1}
+        />
+        Countdown
+        <input
+          type="text"
+          className="App-start-countdown"
+          value={countdown}
+          onChange={(e) => onCountdownChange(e.target.value)}
+          onFocus={() => onModeChange("down")}
+          placeholder="M:SS"
+          size={5}
+          aria-label="Countdown duration"
+          tabIndex={-1}
+        />
+      </label>
+      <label>
+        <input
+          type="radio"
+          name={radioGroup}
+          checked={mode === "rank"}
+          onChange={() => onModeChange("rank")}
+          tabIndex={-1}
+        />
+        First to
+        <select
+          value={targetRank}
+          onChange={(e) => {
+            onModeChange("rank");
+            onTargetRankChange(Number(e.target.value));
+          }}
+          aria-label="Target rank"
+          tabIndex={-1}
+        >
+          {/* Indexes match RANKS in shared/ranks.js. */}
+          <option value={4}>Great</option>
+          <option value={5}>Amazing</option>
+          <option value={6}>Genius</option>
+        </select>
       </label>
     </fieldset>
   );
