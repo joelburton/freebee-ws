@@ -167,8 +167,8 @@ describe("makeGame against the real word lists", () => {
   beforeAll(async () => {
     const dir = path.join(process.cwd(), "data");
     const [legalText, scoringText] = await Promise.all([
-      fs.readFile(path.join(dir, "legal-words.txt"), "utf8"),
-      fs.readFile(path.join(dir, "scoring-words.txt"), "utf8"),
+      fs.readFile(path.join(dir, "scowl-70.txt"), "utf8"),
+      fs.readFile(path.join(dir, "scowl-50.txt"), "utf8"),
     ]);
     data = processWords(legalText, scoringText);
   });

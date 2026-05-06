@@ -1,4 +1,31 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { fetchDefinition } from "../api.js";
+
+// How long the definition popover stays up after a click. Clicking
+// another word swaps in the new definition and resets the timer.
+const DEFINITION_VISIBLE_MS = 5000;
+// Phone breakpoint matches §10 of globals.css. The definition popover
+// is desktop-only — on phone, taps on word-list items do nothing.
+const PHONE_QUERY = "(max-width: 759px)";
+
+// Definition text uses three pairs of sigils: {polite=adj} for
+// cross-references, <wear=v> for variant pointers, [adj IMPOLITER,
+// IMPOLITEST] for inflection lists. Render the contents italicized
+// while keeping the surrounding punctuation visible (the brackets
+// carry structural meaning the player can still parse).
+const SIGIL_RE = /([{<[])([^}>\]]*)([}>\]])/g;
+function renderDefinition(text) {
+  const out = [];
+  let i = 0;
+  let key = 0;
+  for (const m of text.matchAll(SIGIL_RE)) {
+    if (m.index > i) out.push(text.slice(i, m.index));
+    out.push(m[1], <em key={key++}>{m[2]}</em>, m[3]);
+    i = m.index + m[0].length;
+  }
+  if (i < text.length) out.push(text.slice(i));
+  return out;
+}
 
 // Default capacity used while we measure or in environments where layout
 // isn't available (jsdom, SSR). Real values come from ResizeObserver
@@ -36,6 +63,40 @@ export default function WordList({
   const [page, setPage] = useState(0);
   const [computedPageSize, setComputedPageSize] = useState(FALLBACK_PAGE_SIZE);
   const listRef = useRef(null);
+  // { word, def, top, left } — fixed-position coords from the clicked
+  // <li>'s bounding rect. `def === null` means "no definition" / pending.
+  const [definition, setDefinition] = useState(null);
+
+  // Auto-dismiss the popover 5s after it appears. If the player clicks
+  // another word, `definition` swaps to the new entry and this effect
+  // re-runs (clearing the previous timer first).
+  useEffect(() => {
+    if (!definition) return;
+    const t = setTimeout(() => setDefinition(null), DEFINITION_VISIBLE_MS);
+    return () => clearTimeout(t);
+  }, [definition]);
+
+  const handleWordClick = async (word, e) => {
+    if (window.matchMedia?.(PHONE_QUERY).matches) return;
+    // Re-clicking the word that's already showing dismisses the popover
+    // (toggle behavior). Same as clicking the popover itself.
+    if (definition && definition.word === word) {
+      setDefinition(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Anchor below the clicked word, left-aligned with it. Show
+    // immediately with a "Looking up…" placeholder so the click feels
+    // responsive even if the request races (it's local sqlite, but
+    // still — showing nothing for 50 ms reads as "did my click work?").
+    setDefinition({ word, def: null, top: rect.bottom, left: rect.left });
+    const def = await fetchDefinition(word);
+    // Bail if the user has since clicked another word; that newer
+    // request owns the popover now.
+    setDefinition((prev) =>
+      prev && prev.word === word ? { ...prev, def: def ?? "" } : prev,
+    );
+  };
 
   // Capacity = columns × rows, derived from the live layout so a future
   // media-query change to column-count or `--wl-row-height` "just works"
@@ -119,6 +180,7 @@ export default function WordList({
                 key={word}
                 className={classes.join(" ") || undefined}
                 style={color ? { color } : undefined}
+                onClick={(e) => handleWordClick(word, e)}
               >
                 {word}
                 {isBonus && (
@@ -129,6 +191,24 @@ export default function WordList({
           })
         )}
       </ul>
+      {definition && (
+        <div
+          className="WordList-define"
+          role="dialog"
+          aria-label={`Definition of ${definition.word}`}
+          style={{ top: definition.top, left: definition.left }}
+          onClick={() => setDefinition(null)}
+        >
+          <div className="WordList-define-word">{definition.word}</div>
+          <div className="WordList-define-body">
+            {definition.def === null
+              ? "…"
+              : definition.def === ""
+                ? "No definition available"
+                : renderDefinition(definition.def)}
+          </div>
+        </div>
+      )}
       {showNav && (
         <div
           className={`WordList-nav${navHidden ? " is-hidden" : ""}`}

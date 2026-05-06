@@ -15,6 +15,7 @@ import {
   newBoardFromSession,
   clientView,
 } from "./sessions.js";
+import { lookupDefinition } from "./defs.js";
 
 async function safeJson(c) {
   try {
@@ -88,6 +89,16 @@ export function registerApiRoutes(app) {
     if (r.error) return r.error;
     const playerId = c.req.query("playerId") || null;
     return c.json(clientView(r.session, playerId));
+  });
+
+  // GET /api/define/:word — dictionary lookup for the word-list popover.
+  // Returns { word, def } on hit, 404 otherwise. The DB stores words in
+  // uppercase, but lookupDefinition normalizes case.
+  app.get("/api/define/:word", (c) => {
+    const word = c.req.param("word");
+    const def = lookupDefinition(word);
+    if (!def) return c.json({ error: "No definition available" }, 404);
+    return c.json({ word: word.toLowerCase(), def });
   });
 
   // POST /api/games/:id/submit — body { word, playerId? }

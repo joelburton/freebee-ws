@@ -1244,6 +1244,7 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
   break-inside: avoid;
+  cursor: pointer;
 }
 
 /* Pangrams are rendered bold to stand out. */
@@ -1289,6 +1290,42 @@ code {
   font-style: italic;
   text-transform: none;
   border-bottom: 0;
+}
+
+/* ---------- Definition popover ----------
+   Click a word in the list and a small popover appears anchored just
+   below it with the dictionary entry. Auto-dismisses after 5s, or
+   when another word is clicked. Desktop-only (the click handler bails
+   on phone; CSS hides the popover too as a belt-and-braces guard).
+
+   Position is set inline by JSX from the clicked <li>'s
+   getBoundingClientRect, so `position: fixed` is correct. */
+.WordList-define {
+  position: fixed;
+  z-index: 200;
+  max-width: 320px;
+  margin-top: 4px;
+  padding: 10px 14px;
+  background: #111;
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.WordList-define-word {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.WordList-define-body {
+  word-break: break-word;
 }
 
 /* Word-list pagination nav — used in two positions: inline below the
@@ -1851,6 +1888,15 @@ code {
     font-size: 20px;
     line-height: 28px;
     padding: 4px 0;
+    /* Definition popover is desktop-only; reset the pointer affordance. */
+    cursor: default;
+  }
+
+  /* Belt-and-braces: the click handler also bails on phone, but if a
+     popover did appear (window resized after a click on tablet, etc.),
+     hide it here so phone never sees one. */
+  .WordList-define {
+    display: none;
   }
 
   /* Action-bar pagination is hidden on phone — the takeover doesn't

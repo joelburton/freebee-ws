@@ -18,6 +18,19 @@ export async function fetchGame(id) {
   return resp.json();
 }
 
+// Dictionary lookup. Resolves to the definition string, or null if the
+// server has no entry (404) or the request fails.
+export async function fetchDefinition(word) {
+  try {
+    const resp = await fetch(`/api/define/${encodeURIComponent(word)}`);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.def || null;
+  } catch {
+    return null;
+  }
+}
+
 // "M:SS" or "MM:SS" → seconds; null on bad input.
 export function parseTime(s) {
   const m = (s || "").trim().match(/^(\d+):(\d{1,2})$/);

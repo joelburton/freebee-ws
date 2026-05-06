@@ -39,4 +39,19 @@ if (typeof window !== "undefined") {
     configurable: true,
     writable: true,
   });
+  // jsdom doesn't implement matchMedia. Components that branch on
+  // viewport (e.g., Chat's "skip focus on phone" behavior) call it on
+  // user interaction; default to a non-matching result so desktop-path
+  // assertions hold.
+  if (!window.matchMedia) {
+    window.matchMedia = () => ({
+      matches: false,
+      media: "",
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    });
+  }
 }
