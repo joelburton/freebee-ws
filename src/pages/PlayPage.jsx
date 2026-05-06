@@ -94,6 +94,16 @@ export default function PlayPage() {
     navigate("/");
   }
 
+  async function handleLeave() {
+    try {
+      await postJson(`/api/games/${gameId}/leave`, { playerId });
+    } catch (e) {
+      console.error("leave failed:", e);
+    }
+    clearSavedState();
+    navigate("/");
+  }
+
   if (loadError) return <div className="App-loading">Error: {loadError}</div>;
   if (!game) return <div className="App-loading">Loading game…</div>;
 
@@ -108,6 +118,7 @@ export default function PlayPage() {
       onNewGame={handleNewBoard}
       onResetSetup={handleResetSetup}
       onConfiguring={handleConfiguring}
+      onLeave={handleLeave}
     />
   );
 }

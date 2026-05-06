@@ -40,9 +40,13 @@ const GRACE_TIMERS = (globalThis.__freebeeGraceTimers ??= new Map());
 // enough that an abandoned game doesn't tie up a session for hours.
 export const PRESENCE_GRACE_MS = 30_000;
 
-// Sessions/groups are evicted after 24h of inactivity. Sweep runs lazily,
-// at most once every SWEEP_INTERVAL_MS, on the lookup hot path.
+// Sessions evict after 24h of inactivity. Groups outlive their longest-
+// played session: chat history persists across boards, so a group that
+// might be picked up next weekend deserves more rope than a one-off
+// game does. Sweep runs lazily, at most once every SWEEP_INTERVAL_MS,
+// on the lookup hot path.
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+export const GROUP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 let lastSweepAt = 0;
 
@@ -220,7 +224,7 @@ function touch(session) {
 }
 
 // Lazy sweep: at most once every SWEEP_INTERVAL_MS, drop sessions and
-// groups whose lastActiveAt is older than SESSION_TTL_MS.
+// groups whose lastActiveAt is past their TTL.
 function maybeSweep() {
   const now = Date.now();
   if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
@@ -229,7 +233,7 @@ function maybeSweep() {
     if (now - s.lastActiveAt > SESSION_TTL_MS) STORE.delete(id);
   }
   for (const [id, g] of GROUPS) {
-    if (now - g.lastActiveAt > SESSION_TTL_MS) {
+    if (now - g.lastActiveAt > GROUP_TTL_MS) {
       GROUPS.delete(id);
       SUBS.delete(id);
     }
@@ -538,6 +542,42 @@ export function addPlayer(group, name) {
   group.lastActiveAt = Date.now();
   broadcastGroup(group);
   return { player };
+}
+
+// Remove a player from the group. Reassigns the host if it was them
+// (oldest remaining player by joinedAt). Cancels configuring if it was
+// them. Deletes the group entirely when the last player leaves; that
+// also drops any SUBS so leftover sockets reading on the same id don't
+// keep the structure alive.
+export function removePlayer(group, playerId) {
+  if (!group) return { error: "Group not found" };
+  const idx = group.players.findIndex((p) => p.playerId === playerId);
+  if (idx < 0) return { error: "Not in this group" };
+  group.players.splice(idx, 1);
+
+  if (group.players.length === 0) {
+    // Last player out: tear down the group and any session it owns.
+    if (group.currentSessionId) STORE.delete(group.currentSessionId);
+    GROUPS.delete(group.id);
+    SUBS.delete(group.id);
+    cancelGrace(group.id);
+    return { ok: true, deleted: true };
+  }
+
+  if (group.hostId === playerId) {
+    // Reassign to the player who's been here longest.
+    let next = group.players[0];
+    for (const p of group.players) {
+      if (p.joinedAt < next.joinedAt) next = p;
+    }
+    group.hostId = next.playerId;
+  }
+  if (group.configuring && group.configuring.ownerId === playerId) {
+    group.configuring = null;
+  }
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
+  return { ok: true, deleted: false };
 }
 
 function cancelGrace(groupId) {

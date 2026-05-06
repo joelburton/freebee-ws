@@ -577,6 +577,30 @@ code {
   opacity: 0.45;
 }
 
+/* "Leave group" — quiet text-link styling so it doesn't compete with
+   the primary CTAs above it. Sits at the bottom of the lobby card. */
+.App-lobby-leave {
+  align-self: flex-start;
+  margin-top: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.App-lobby-leave:hover:not(:disabled) {
+  color: #c62828;
+}
+
+.App-lobby-leave:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ============================================================
    7. Game — everything below is shared by solo + multi.
       Solo and multi render the same <Game> component; multi-only

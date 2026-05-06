@@ -1632,3 +1632,91 @@ describe("Multiplayer configure flow", () => {
     expect(second.state).toBe("active");
   });
 });
+
+describe("Multiplayer leave-group", () => {
+  async function emptyGroup() {
+    const res = await app.fetch(
+      jsonReq("http://localhost/api/groups", { playerName: "Host" }),
+    );
+    const host = await res.json();
+    const join = await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
+        playerName: "Buddy",
+      }),
+    );
+    const buddy = await join.json();
+    return {
+      gameId: host.gameId,
+      hostId: host.playerId,
+      buddyId: buddy.playerId,
+    };
+  }
+
+  function leave(gameId, playerId) {
+    return app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/leave`, { playerId }),
+    );
+  }
+
+  it("removes the caller from the roster; remaining players see them gone", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    const res = await leave(gameId, buddyId);
+    expect(res.status).toBe(200);
+    const view = await (
+      await app.fetch(new Request(`http://localhost/api/games/${gameId}`))
+    ).json();
+    expect(view.players.map((p) => p.playerId)).toEqual([hostId]);
+  });
+
+  it("reassigns the host when the host leaves", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await leave(gameId, hostId);
+    const view = await (
+      await app.fetch(new Request(`http://localhost/api/games/${gameId}`))
+    ).json();
+    expect(view.players.map((p) => p.playerId)).toEqual([buddyId]);
+    expect(view.hostId).toBe(buddyId);
+  });
+
+  it("clears configuring when the configurator leaves", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    await leave(gameId, hostId);
+    const view = await (
+      await app.fetch(new Request(`http://localhost/api/games/${gameId}`))
+    ).json();
+    expect(view.state).toBe("assembling");
+    expect(view.configuring).toBeUndefined();
+    // Host got reassigned to buddy on the way out.
+    expect(view.hostId).toBe(buddyId);
+  });
+
+  it("deletes the group when the last player leaves; URL 404s afterward", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await leave(gameId, buddyId);
+    await leave(gameId, hostId);
+    const res = await app.fetch(
+      new Request(`http://localhost/api/games/${gameId}`),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("non-member leave is rejected (403)", async () => {
+    const { gameId } = await emptyGroup();
+    const res = await leave(gameId, "stranger");
+    expect(res.status).toBe(403);
+  });
+
+  it("404s on a solo game (no group to leave)", async () => {
+    const create = await app.fetch(
+      jsonReq("http://localhost/api/games", {}),
+    );
+    const { gameId } = await create.json();
+    const res = await leave(gameId, "x");
+    expect(res.status).toBe(404);
+  });
+});

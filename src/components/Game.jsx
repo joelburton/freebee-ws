@@ -40,6 +40,7 @@ export default function Game({
   onNewGame,
   onResetSetup,
   onConfiguring,
+  onLeave,
   playerId = null,
 }) {
   const [found, setFound] = useState(game.found || []);
@@ -618,6 +619,15 @@ export default function Game({
                 onClick={handleEndClick}
               >
                 End game
+              </button>
+            )}
+            {onLeave && (
+              <button
+                type="button"
+                className="Side-button"
+                onClick={onLeave}
+              >
+                Leave
               </button>
             )}
           </div>

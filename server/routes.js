@@ -9,6 +9,7 @@ import {
   isHost,
   isMultiplayer,
   addPlayer,
+  removePlayer,
   startSession,
   pauseSession,
   resumeSession,
@@ -252,6 +253,19 @@ export function registerApiRoutes(app) {
       : groupView(group, result.player.playerId);
     view.playerId = result.player.playerId;
     return c.json(view);
+  });
+
+  // POST /api/games/:id/leave — body { playerId }. Removes the caller
+  // from the group's roster. Server reassigns the host if needed and
+  // tears the group down when the last player leaves.
+  app.post("/api/games/:id/leave", async (c) => {
+    const id = c.req.param("id");
+    const group = getGroupForId(id);
+    if (!group) return c.json({ error: "Game not found" }, 404);
+    const body = await safeJson(c);
+    const result = removePlayer(group, body.playerId);
+    if (result.error) return c.json({ error: result.error }, 403);
+    return c.json({ ok: true });
   });
 
   // POST /api/games/:id/start — multiplayer only, host only, body { playerId }

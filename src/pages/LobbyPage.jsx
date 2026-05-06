@@ -125,6 +125,20 @@ export default function LobbyPage() {
     }
   }
 
+  async function handleLeave() {
+    setBusy(true);
+    setActionError("");
+    try {
+      await postJson(`/api/games/${gameId}/leave`, { playerId });
+    } catch (e) {
+      // Even if the server call fails, drop our local identity — we
+      // shouldn't keep someone stuck on a group they tried to leave.
+      console.error("leave failed:", e);
+    }
+    clearSavedState();
+    navigate("/");
+  }
+
   async function handleCancelSetup() {
     setBusy(true);
     setActionError("");
@@ -370,6 +384,14 @@ export default function LobbyPage() {
           </>
         )}
         {actionError && <p className="App-start-error">{actionError}</p>}
+        <button
+          type="button"
+          className="App-lobby-leave"
+          onClick={handleLeave}
+          disabled={busy}
+        >
+          Leave group
+        </button>
       </section>
     </div>
   );
