@@ -61,11 +61,18 @@ export function registerWebSocket(app, upgradeWebSocket) {
             presenceCounted = true;
           }
 
-          sendJson(ws, { type: "state", view: clientView(session) });
-
-          unsubscribe = subscribeToSession(gameId, (view) => {
-            sendJson(ws, { type: "state", view });
+          sendJson(ws, {
+            type: "state",
+            view: clientView(session, playerId),
           });
+
+          unsubscribe = subscribeToSession(
+            gameId,
+            (view) => {
+              sendJson(ws, { type: "state", view });
+            },
+            playerId,
+          );
 
           heartbeat = setInterval(() => {
             const s = getSession(gameId);
@@ -77,7 +84,10 @@ export function registerWebSocket(app, upgradeWebSocket) {
               }
               return;
             }
-            sendJson(ws, { type: "heartbeat", view: clientView(s) });
+            sendJson(ws, {
+              type: "heartbeat",
+              view: clientView(s, playerId),
+            });
           }, HEARTBEAT_MS);
         },
         onClose() {
