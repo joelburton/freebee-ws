@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 # Adjust User/Group/WorkingDirectory to match your server.
-User=joel
-Group=joel
+User=admin
+Group=admin
 WorkingDirectory=/opt/freebee
 
 Environment=NODE_ENV=production
