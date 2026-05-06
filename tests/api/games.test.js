@@ -1024,6 +1024,37 @@ describe("Multiplayer new-board", () => {
     expect(data.countdownSeconds).toBe(90);
   });
 
+  it("with timerMode 'none', successor is unpaused (not stuck blurred)", async () => {
+    // A "none" game has no pause/resume button, so a paused successor
+    // would be unrecoverable — see newBoardFromSession.
+    const create = await app.fetch(
+      jsonReq("http://localhost/api/games", {
+        playerName: "Host",
+        timerMode: "none",
+      }),
+    );
+    const host = await create.json();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/start`, {
+        playerId: host.playerId,
+      }),
+    );
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/end`, {
+        playerId: host.playerId,
+      }),
+    );
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/new-board`, {
+        playerId: host.playerId,
+      }),
+    );
+    const data = await res.json();
+    expect(data.timerMode).toBe("none");
+    expect(data.paused).toBe(false);
+    expect(data.state).toBe("active");
+  });
+
   it("is idempotent: a second caller gets the same successor", async () => {
     const old = await buildEndedMulti();
     const a = await (await newBoard(old.gameId, old.hostId)).json();

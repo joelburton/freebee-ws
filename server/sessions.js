@@ -425,7 +425,11 @@ export async function newBoardFromSession(oldSession) {
     ended: false,
     timerMode: oldSession.timerMode,
     countdownSeconds: oldSession.countdownSeconds,
-    paused: oldSession.timerMode === "none",
+    // New-board always starts running. startedAt is null for "none"
+    // (there's no clock to anchor), but paused stays false — there's
+    // no resume affordance for a "none" game, so a paused successor
+    // would be unrecoverable.
+    paused: false,
     startedAt: oldSession.timerMode === "none" ? null : now,
     accumulatedMs: 0,
     createdAt: now,
