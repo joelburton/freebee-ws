@@ -1557,6 +1557,48 @@ describe("Multiplayer configure flow", () => {
     expect(view.targetRank).toBe(6);
   });
 
+  it("owner can push a draft; everyone (incl. non-owners) sees it on the view", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/update`, {
+        playerId: hostId,
+        draft: { mode: "compete", timerMode: "down", countdownInput: "3:00" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const view = await (
+      await app.fetch(
+        new Request(`http://localhost/api/games/${gameId}?playerId=${buddyId}`),
+      )
+    ).json();
+    expect(view.configuring.draft).toMatchObject({
+      mode: "compete",
+      timerMode: "down",
+      countdownInput: "3:00",
+    });
+  });
+
+  it("non-owner draft update is rejected (409)", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/update`, {
+        playerId: buddyId,
+        draft: { mode: "compete" },
+      }),
+    );
+    expect(res.status).toBe(409);
+  });
+
   it("non-owner commit is rejected (403)", async () => {
     const { gameId, hostId, buddyId } = await emptyGroup();
     await app.fetch(

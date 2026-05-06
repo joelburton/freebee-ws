@@ -20,6 +20,7 @@ import {
   startConfiguring,
   cancelConfiguring,
   commitConfiguration,
+  updateDraft,
   clientView,
   groupView,
 } from "./sessions.js";
@@ -131,6 +132,21 @@ export function registerApiRoutes(app) {
       return c.json({ error: result.error }, status);
     }
     return c.json(groupView(group, body.playerId));
+  });
+
+  // Owner pushes the in-progress form state so other players' read-only
+  // mirror updates live. Body { playerId, draft }. Owner-only.
+  app.post("/api/games/:id/configure/update", async (c) => {
+    const id = c.req.param("id");
+    const group = getGroupForId(id);
+    if (!group) return c.json({ error: "Game not found" }, 404);
+    const body = await safeJson(c);
+    const result = updateDraft(group, body.playerId, body.draft);
+    if (result.error) {
+      const status = result.error === "Not in this group" ? 403 : 409;
+      return c.json({ error: result.error }, status);
+    }
+    return c.json({ ok: true });
   });
 
   app.post("/api/games/:id/configure/cancel", async (c) => {

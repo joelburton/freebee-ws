@@ -474,6 +474,23 @@ export function cancelConfiguring(group, playerId) {
   return { ok: true };
 }
 
+// Owner pushes their in-progress form state so other players see what
+// they're picking in real time. Stored on group.configuring.draft;
+// included in views so non-owners can render a read-only mirror.
+// Commit reads its options from the request body, not the draft, so
+// a debounced/delayed draft can't poison commit.
+export function updateDraft(group, playerId, draft) {
+  const err = configureGuard(group, playerId);
+  if (err) return err;
+  if (!group.configuring || group.configuring.ownerId !== playerId) {
+    return { error: "Not the configurator" };
+  }
+  group.configuring.draft = draft && typeof draft === "object" ? draft : {};
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
+  return { ok: true };
+}
+
 // Commit configuration: create a session in the group with the given
 // options. Owner-only. Releases configuring state.
 export async function commitConfiguration(group, playerId, opts) {
@@ -812,7 +829,10 @@ export function groupView(group, viewerId = null) {
     messages: group.messages.slice(),
   };
   if (group.configuring) {
-    view.configuring = { ownerId: group.configuring.ownerId };
+    view.configuring = {
+      ownerId: group.configuring.ownerId,
+      draft: group.configuring.draft ?? {},
+    };
   }
   return view;
 }
@@ -856,7 +876,10 @@ export function clientView(session, viewerId = null) {
       // group is back in configuring while the ended session is still
       // the current one. Surface so the client can show the wait /
       // form screens over the end-of-game view.
-      view.configuring = { ownerId: group.configuring.ownerId };
+      view.configuring = {
+        ownerId: group.configuring.ownerId,
+        draft: group.configuring.draft ?? {},
+      };
     }
     view.players = group.players.map((p) => {
       const base = {

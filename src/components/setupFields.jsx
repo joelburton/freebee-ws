@@ -81,13 +81,14 @@ export function TimerControls({
   onModeChange,
   countdown,
   onCountdownChange,
+  disabled = false,
 }) {
   // Timer-mode is an infrequent setup choice; keep these fields out of the
   // tab order so Tab from "Name" lands on a Go button rather than silently
   // switching timer mode via the countdown input's onFocus handler. They
   // remain reachable by click.
   return (
-    <fieldset className="App-start-timer">
+    <fieldset className="App-start-timer" disabled={disabled}>
       <legend>Timer</legend>
       <label>
         <input
@@ -144,9 +145,10 @@ export function EndCondition({
   onCountdownChange,
   targetRank,
   onTargetRankChange,
+  disabled = false,
 }) {
   return (
-    <fieldset className="App-start-timer">
+    <fieldset className="App-start-timer" disabled={disabled}>
       <legend>End condition</legend>
       <label>
         <input
