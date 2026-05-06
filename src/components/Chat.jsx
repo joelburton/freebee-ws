@@ -220,8 +220,12 @@ const Chat = forwardRef(function Chat(
               onClick={() => {
                 setOpen(false);
                 // Hand focus back to the word input — closing the chat
-                // is conceptually the same as Tab-away.
-                onTabAway?.();
+                // is conceptually the same as Tab-away. Skip on phone:
+                // focusing the input pops the on-screen keyboard, which
+                // covers the board the player wanted to get back to.
+                if (!window.matchMedia("(max-width: 759px)").matches) {
+                  onTabAway?.();
+                }
               }}
               aria-label="Close chat"
             >

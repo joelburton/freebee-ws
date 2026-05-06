@@ -586,6 +586,11 @@ export default function Game({
             recentlyFound={displayEnded ? null : recentlyFound}
             showNav={false}
             onPagination={setWordPagination}
+            // Phone takeover (the only place wordListOpen flips true —
+            // the toggle button is hidden by media query on tablet+):
+            // ditch pagination so the player scrolls a single flowing
+            // list instead of tapping next/prev.
+            paginate={!wordListOpen}
           />
         </div>
         <div className="Game-side-bar">

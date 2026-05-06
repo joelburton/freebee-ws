@@ -1797,36 +1797,64 @@ code {
     display: none;
   }
 
-  /* ---- Word list: phone popover ----
-     On phone, the inline word list disappears and is replaced by a
-     fixed-position popover (like the chat) toggled by a button on the
-     action bar. */
+  /* ---- Word list: phone full-screen view ----
+     On phone, the inline word list disappears and the toggle button
+     opens it as a full-viewport takeover. The takeover scrolls; words
+     are laid out row-first (see WordList-scroll below) so swiping
+     down reveals the next words alphabetically rather than jumping
+     across columns. */
 
   .Game-wordlist {
     display: none;
   }
 
   .Game-wordlist.is-open {
+    /* The takeover itself is the scroll container: simpler than a
+       nested flex/grid chain, where each layer needs flex: 1 +
+       min-height: 0 to propagate a definite height to the grid — and
+       any one of them silently failing collapses the layout (rows get
+       squished, no overflow, no scroll). Letting the grid grow with
+       its content and scrolling at the outer fixed-position element
+       sidesteps that whole class of bugs. */
     display: block;
     position: fixed;
-    inset: 60px 16px 100px;
+    inset: 0;
     background: #fff;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
     z-index: 99;
-    padding: 14px;
-    overflow: hidden;
+    /* Top padding clears the absolutely-positioned close button. */
+    padding: 44px 14px 14px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* Inside the popover, let the WordList fill the available height so
-     `column-fill: auto` has the popover's height to break against. */
-  .Game-wordlist.is-open .WordList {
-    height: 100%;
+  /* Phone takeover: a row-first grid (multicol fills column-by-column,
+     which is wrong for vertical scrolling — you'd scroll past column 1
+     before seeing column 2). The component passes `paginate={false}`
+     here so all words render and the takeover container scrolls. */
+  .Game-wordlist.is-open .WordList-scroll {
+    /* Reset multicol props inherited from .WordList. */
+    column-count: auto;
+    column-gap: 0;
+    column-fill: auto;
+    height: auto;
+
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-auto-flow: row;
+    column-gap: 14px;
   }
 
-  /* Action-bar pagination is hidden on phone — the popover handles
-     paging itself if/when we add it. The toggle button takes its slot. */
+  .Game-wordlist.is-open .WordList-scroll li {
+    /* Override the fixed row height (only meaningful for column-fill:
+       auto) so taller font-sizes can breathe. */
+    height: auto;
+    font-size: 20px;
+    line-height: 28px;
+    padding: 4px 0;
+  }
+
+  /* Action-bar pagination is hidden on phone — the takeover doesn't
+     paginate (single scrolling list). The toggle button takes its slot. */
   .Game-side-bar-nav {
     display: none;
   }
@@ -1851,15 +1879,19 @@ code {
 
   .Game-wordlist.is-open .Game-wordlist-close {
     display: inline-flex;
-    position: absolute;
+    /* Fixed (not absolute): the takeover container is the scroll
+       parent, so an absolutely-positioned close button scrolls with
+       the content and disappears once the player swipes down. */
+    position: fixed;
     top: 6px;
     right: 8px;
-    font-size: 22px;
+    font-size: 28px;
     line-height: 1;
-    background: none;
+    background: #fff;
     border: 0;
     color: var(--muted);
     cursor: pointer;
     padding: 4px 8px;
+    z-index: 1;
   }
 }

@@ -28,6 +28,10 @@ export default function WordList({
   // Notified whenever pagination state changes:
   // { page, totalPages, setPage }. The setPage reference is stable.
   onPagination,
+  // When false, render every word in a single flowing list (no slicing,
+  // no nav, no measurement). The phone full-screen takeover uses this
+  // so the player can scroll instead of paging.
+  paginate = true,
 }) {
   const [page, setPage] = useState(0);
   const [computedPageSize, setComputedPageSize] = useState(FALLBACK_PAGE_SIZE);
@@ -38,6 +42,7 @@ export default function WordList({
   // without code changes. ResizeObserver keeps it in sync if the panel
   // resizes (e.g., window resize on a responsive layout).
   useLayoutEffect(() => {
+    if (!paginate) return;
     if (pageSizeProp != null) return;
     const el = listRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -59,9 +64,9 @@ export default function WordList({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [pageSizeProp]);
+  }, [pageSizeProp, paginate]);
 
-  const pageSize = pageSizeProp ?? computedPageSize;
+  const pageSize = paginate ? (pageSizeProp ?? computedPageSize) : Infinity;
 
   const foundSet = new Set(found);
 
@@ -86,7 +91,10 @@ export default function WordList({
 
   return (
     <div className="WordList-wrapper">
-      <ul ref={listRef} className="WordList">
+      <ul
+        ref={listRef}
+        className={`WordList${paginate ? "" : " WordList-scroll"}`}
+      >
         {sorted.length === 0 ? (
           <li className="WordList-empty">No words yet</li>
         ) : (
