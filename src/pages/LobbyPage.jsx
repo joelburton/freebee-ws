@@ -313,7 +313,16 @@ export default function LobbyPage() {
                   <span className="App-lobby-tag">host</span>
                 )}
                 {p.playerId === playerId && (
-                  <span className="App-lobby-tag">you</span>
+                  <button
+                    type="button"
+                    className="Roster-leave"
+                    onClick={handleLeave}
+                    disabled={busy}
+                    title="Leave group"
+                    aria-label="Leave group"
+                  >
+                    ×
+                  </button>
                 )}
               </li>
             ))}
@@ -394,14 +403,6 @@ export default function LobbyPage() {
           </>
         )}
         {actionError && <p className="App-start-error">{actionError}</p>}
-        <button
-          type="button"
-          className="App-lobby-leave"
-          onClick={handleLeave}
-          disabled={busy}
-        >
-          Leave group
-        </button>
       </section>
     </div>
   );

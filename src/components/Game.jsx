@@ -500,6 +500,7 @@ export default function Game({
             playerId={playerId}
             winnerId={displayEnded ? winnerId : null}
             ended={displayEnded}
+            onLeave={onLeave}
           />
         ) : (
           players.length > 0 && (
@@ -512,8 +513,8 @@ export default function Game({
                 >
                   <span className="Game-roster-dot" aria-hidden="true" />
                   <span className="Game-roster-name">{p.name}</span>
-                  {p.playerId === playerId && (
-                    <span className="Game-roster-tag">you</span>
+                  {p.playerId === playerId && onLeave && (
+                    <LeaveX onClick={onLeave} />
                   )}
                 </li>
               ))}
@@ -621,15 +622,6 @@ export default function Game({
                 End game
               </button>
             )}
-            {onLeave && (
-              <button
-                type="button"
-                className="Side-button"
-                onClick={onLeave}
-              >
-                Leave
-              </button>
-            )}
           </div>
           <div
             className={`WordList-nav Game-side-bar-nav${
@@ -686,11 +678,10 @@ export default function Game({
 }
 
 // Compete leaderboard — sorted by score desc, with each player's name,
-// score and word count. The viewer is tagged "you" (hidden on phone
-// where space is tight and the player knows who they are) and post-end
-// each top-scoring player is tagged "winner" — or "tied" when the top
-// score is shared.
-function Leaderboard({ players, playerId, winnerId, ended }) {
+// score and word count. Post-end, each top-scoring player is tagged
+// "winner" — or "tied" when the top score is shared. The current
+// player gets a small × to leave the group instead of a "you" pill.
+function Leaderboard({ players, playerId, winnerId, ended, onLeave }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
   const topScore = sorted.length ? sorted[0].score : 0;
   const sharedTop =
@@ -709,10 +700,8 @@ function Leaderboard({ players, playerId, winnerId, ended }) {
           >
             <span className="Game-roster-dot" aria-hidden="true" />
             <span className="Game-leaderboard-name">{p.name}</span>
-            {p.playerId === playerId && (
-              <span className="Game-roster-tag Game-roster-tag-you">
-                you
-              </span>
+            {p.playerId === playerId && onLeave && (
+              <LeaveX onClick={onLeave} />
             )}
             {atTop && sharedTop && (
               <span className="Game-roster-tag Game-roster-tag-tied">
@@ -730,6 +719,24 @@ function Leaderboard({ players, playerId, winnerId, ended }) {
         );
       })}
     </ol>
+  );
+}
+
+// Tiny "leave the group" affordance shown next to the current player's
+// row in rosters and leaderboards. Replaces both the standalone "Leave"
+// button (which read as a generic action when sat next to End game)
+// and the redundant "you" pill (the × is itself a self-locator).
+function LeaveX({ onClick }) {
+  return (
+    <button
+      type="button"
+      className="Roster-leave"
+      onClick={onClick}
+      title="Leave group"
+      aria-label="Leave group"
+    >
+      ×
+    </button>
   );
 }
 

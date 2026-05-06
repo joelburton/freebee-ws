@@ -137,18 +137,21 @@ describe("Game · multiplayer awareness", () => {
     expect(document.querySelector(".Game-roster")).toBeNull();
   });
 
-  it("multi game renders roster with each player's color and tags 'you'", () => {
+  it("multi game renders roster with each player's color and a Leave × on the viewer's row", () => {
     mockServer();
-    render(<Game game={multiGame} playerId="p-host" />);
+    render(
+      <Game game={multiGame} playerId="p-host" onLeave={() => {}} />,
+    );
     const roster = document.querySelector(".Game-roster");
     expect(roster).not.toBeNull();
     const players = roster.querySelectorAll(".Game-roster-player");
     expect(players).toHaveLength(2);
     expect(players[0].textContent).toMatch(/Joel/);
-    expect(players[0].textContent).toMatch(/you/);
+    // Self-locator is the × button (title "Leave group"), not a "you" pill.
+    expect(players[0].querySelector(".Roster-leave")).not.toBeNull();
     expect(players[0].style.getPropertyValue("--player-color")).toBe("#1976d2");
     expect(players[1].textContent).toMatch(/Buddy/);
-    expect(players[1].textContent).not.toMatch(/you/);
+    expect(players[1].querySelector(".Roster-leave")).toBeNull();
     expect(players[1].style.getPropertyValue("--player-color")).toBe("#e64a19");
   });
 

@@ -547,7 +547,8 @@ code {
   font-weight: 600;
 }
 
-/* "host" / "you" pills next to a player's name in the lobby roster. */
+/* "host" pill next to a player's name in the lobby roster. The
+   current player is identified by the .Roster-leave × instead. */
 .App-lobby-tag {
   font-size: 11px;
   font-weight: 700;
@@ -577,27 +578,33 @@ code {
   opacity: 0.45;
 }
 
-/* "Leave group" — quiet text-link styling so it doesn't compete with
-   the primary CTAs above it. Sits at the bottom of the lobby card. */
-.App-lobby-leave {
-  align-self: flex-start;
-  margin-top: 4px;
+/* Tiny "×" sitting next to the current player's name in rosters and
+   leaderboards (lobby + in-game). Clicking leaves the group. Used in
+   place of the old "you" pill — the × is itself the self-locator. */
+.Roster-leave {
   font: inherit;
-  font-size: 12px;
-  color: var(--muted);
-  background: none;
+  font-size: 16px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
   border: 0;
-  padding: 0;
+  background: none;
+  color: var(--muted);
   cursor: pointer;
-  text-decoration: underline;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
 }
 
-.App-lobby-leave:hover:not(:disabled) {
+.Roster-leave:hover:not(:disabled) {
+  background: #fdecea;
   color: #c62828;
 }
 
-.App-lobby-leave:disabled {
-  opacity: 0.5;
+.Roster-leave:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -978,8 +985,9 @@ code {
 
 /* ---------- Compete: leaderboard + winner banner ----------
    Replaces the simple .Game-roster in compete mode. Each row shows
-   the player's color dot, name, "you"/"winner" tags, and their
-   live score + word count. Sorted by score by the parent. */
+   the player's color dot, name, "winner"/"tied" tag, and their live
+   score + word count. The current player gets a small × (.Roster-leave)
+   in place of a "you" pill. Sorted by score by the parent. */
 
 .Game-leaderboard {
   list-style: none;
@@ -1844,16 +1852,14 @@ code {
   }
 
   /* Phone leaderboard: lay players out in two columns since two is
-     the typical roster size, drop the "you" tag (the player knows
-     who they are), and drop the word count. The remaining "dot
-     name [tag] score" row is compact enough to fit two-up. */
+     the typical roster size, and drop the word count. The remaining
+     "dot name [tag] score" row is compact enough to fit two-up. */
   .Game-leaderboard {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 4px 14px;
   }
 
-  .Game-roster-tag-you,
   .Game-leaderboard-count {
     display: none;
   }
