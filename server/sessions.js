@@ -7,6 +7,7 @@ import {
   validateCustomLetters,
   scoreWord,
 } from "./game.js";
+import { currentRankIndex } from "../shared/ranks.js";
 
 // HMR-safe: surviving dev hot reloads keeps in-flight games intact.
 const STORE = (globalThis.__freebeeSessions ??= new Map());
@@ -123,6 +124,13 @@ function makePlayer(name, color) {
     // browser opening the socket) read as offline until they connect.
     connections: 0,
     joinedAt: Date.now(),
+    // Per-player word state. Used by compete mode (each player has
+    // their own list); co-op leaves these empty and uses the
+    // session-level versions instead.
+    found: [],
+    foundSet: new Set(),
+    bonusFound: [],
+    score: 0,
   };
 }
 
@@ -437,6 +445,12 @@ export async function newBoardFromSession(oldSession) {
       color: p.color,
       connections: 0,
       joinedAt: now,
+      // Reset per-player state for the new board (compete uses these;
+      // co-op ignores them).
+      found: [],
+      foundSet: new Set(),
+      bonusFound: [],
+      score: 0,
     })),
     foundBy: {},
     // Carry chat backlog forward — same group, same conversation. Player
@@ -521,6 +535,18 @@ export function endSession(session) {
   session.paused = true;
   session.ended = true;
   session.state = "ended";
+  // Compete: pick a winner. First-to-rank ends are triggered by the
+  // first player to reach the threshold — they uniquely have the
+  // highest score at that moment, so "highest score" resolves to them.
+  // Countdown / manual ends just rank by final score (first-found wins
+  // ties since `>` is strict).
+  if (session.mode === "compete") {
+    let best = null;
+    for (const p of session.players) {
+      if (!best || p.score > best.score) best = p;
+    }
+    if (best) session.winnerId = best.playerId;
+  }
   touch(session);
   broadcast(session);
   return session;
@@ -556,24 +582,68 @@ export function clientView(session, viewerId = null) {
   };
   if (isMultiplayer(session)) {
     view.hostId = session.hostId;
-    view.players = session.players.map((p) => ({
-      playerId: p.playerId,
-      name: p.name,
-      color: p.color,
-      online: (p.connections || 0) > 0,
-    }));
+    view.players = session.players.map((p) => {
+      const base = {
+        playerId: p.playerId,
+        name: p.name,
+        color: p.color,
+        online: (p.connections || 0) > 0,
+      };
+      if (session.mode === "compete") {
+        // Leaderboard data — every player sees every player's score
+        // and word count, but never their actual word lists.
+        base.score = p.score;
+        base.foundCount = p.found.length;
+      }
+      return base;
+    });
     view.foundBy = { ...session.foundBy };
     view.messages = session.messages.slice();
     if (session.nextGameId) view.nextGameId = session.nextGameId;
     if (session.targetRank != null) view.targetRank = session.targetRank;
+  }
+
+  // Compete: replace the (unused) session-level word state with the
+  // viewer's own slice, so each player only sees what they themselves
+  // have found. An unknown viewerId (observer) gets an empty list.
+  if (session.mode === "compete") {
+    const viewer = session.players.find((p) => p.playerId === viewerId);
+    if (viewer) {
+      view.found = viewer.found.slice();
+      view.bonusFound = viewer.bonusFound.slice();
+      view.score = viewer.score;
+    } else {
+      view.found = [];
+      view.bonusFound = [];
+      view.score = 0;
+    }
+    if (session.winnerId) view.winnerId = session.winnerId;
+
+    // Post-end: precompute "missedByMe" — words the viewer didn't find
+    // that someone else did. Drives the post-game wordlist where the
+    // viewer sees what they missed (others' words) plus unfound greys
+    // (words nobody got). Excluded entirely: words the viewer found
+    // themselves. Iteration order is stable; first finder wins ties.
+    if (session.ended && viewer) {
+      const missed = {};
+      for (const p of session.players) {
+        if (p.playerId === viewer.playerId) continue;
+        for (const w of p.found) {
+          if (viewer.foundSet.has(w)) continue;
+          if (!(w in missed)) missed[w] = p.playerId;
+        }
+      }
+      view.missedByMe = missed;
+    }
   }
   if (session.ended) view.revealList = session.revealList;
   return view;
 }
 
 // Mirrors the original client tryWord ordering: bad letters → too short →
-// missing center → already found → membership check. `playerId` is recorded
-// for multi attribution; solo passes null.
+// missing center → already found → membership check. `playerId` is
+// required in compete (per-player state) and recorded for co-op
+// attribution; solo passes null.
 export function submitWord(session, rawInput, playerId = null) {
   const word = String(rawInput || "").toLowerCase().trim();
   const allowed = new Set(session.letters + session.center);
@@ -584,7 +654,17 @@ export function submitWord(session, rawInput, playerId = null) {
   if (!word.includes(session.center)) {
     return { result: SUBMIT.MISSING_CENTER };
   }
-  if (session.foundSet.has(word)) {
+
+  // Compete: state lives on the player record, so the "already found"
+  // check is per-player (player A finding "lemon" does not block B
+  // from finding it). Solo + co-op share session-level state.
+  const isCompete = session.mode === "compete";
+  const player = isCompete
+    ? session.players.find((p) => p.playerId === playerId)
+    : null;
+  const foundSet = isCompete ? player.foundSet : session.foundSet;
+
+  if (foundSet.has(word)) {
     return { result: SUBMIT.ALREADY_FOUND };
   }
   if (!session.wordlistSet.has(word)) {
@@ -593,12 +673,31 @@ export function submitWord(session, rawInput, playerId = null) {
   const points = scoreWord(word);
   const isPangram = new Set(word).size === 7;
   const isBonus = !session.scoringSet.has(word);
-  session.found.push(word);
-  session.foundSet.add(word);
-  if (isBonus) session.bonusFound.push(word);
-  session.score += points;
-  if (session.mode === "multi" && playerId) {
-    session.foundBy[word] = playerId;
+
+  if (isCompete) {
+    player.found.push(word);
+    player.foundSet.add(word);
+    if (isBonus) player.bonusFound.push(word);
+    player.score += points;
+    // First-to-rank: end the game (for everyone, mid-word allowed) as
+    // soon as any player reaches the target rank. This player is the
+    // winner — endSession's "highest score" rule resolves to them
+    // since nobody else could have reached the threshold first
+    // without ending the game already.
+    if (
+      session.targetRank != null &&
+      currentRankIndex(player.score, session.total) >= session.targetRank
+    ) {
+      endSession(session);
+    }
+  } else {
+    session.found.push(word);
+    session.foundSet.add(word);
+    if (isBonus) session.bonusFound.push(word);
+    session.score += points;
+    if (session.mode === "multi" && playerId) {
+      session.foundBy[word] = playerId;
+    }
   }
   touch(session);
   broadcast(session);
@@ -608,9 +707,11 @@ export function submitWord(session, rawInput, playerId = null) {
     points,
     isPangram,
     bonus: isBonus,
-    totalScore: session.score,
-    found: session.found.slice(),
-    bonusFound: session.bonusFound.slice(),
+    totalScore: isCompete ? player.score : session.score,
+    found: isCompete ? player.found.slice() : session.found.slice(),
+    bonusFound: isCompete
+      ? player.bonusFound.slice()
+      : session.bonusFound.slice(),
   };
 }
 

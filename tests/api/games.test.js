@@ -1203,3 +1203,200 @@ describe("Multiplayer chat", () => {
     expect(view.messages.at(-1).text).toBe("m104");
   });
 });
+
+describe("Compete mode", () => {
+  // Build a compete game with a custom letter-set so we know exactly
+  // which words are valid (avoiding the random-seeded scoring list).
+  // Letters "bdeint" + center "r" yields several words including
+  // "tribe", "rebind", "trident", "interbred".
+  async function buildCompete() {
+    const create = await app.fetch(
+      jsonReq("http://localhost/api/games", {
+        playerName: "Host",
+        mode: "compete",
+        letters: "bdeint",
+        center: "r",
+      }),
+    );
+    const host = await create.json();
+    const join = await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
+        playerName: "Buddy",
+      }),
+    );
+    const buddy = await join.json();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/start`, {
+        playerId: host.playerId,
+      }),
+    );
+    return {
+      gameId: host.gameId,
+      hostId: host.playerId,
+      buddyId: buddy.playerId,
+    };
+  }
+
+  function submit(gameId, playerId, word) {
+    return app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/submit`, {
+        word,
+        playerId,
+      }),
+    );
+  }
+
+  function getView(gameId, playerId) {
+    const qs = playerId ? `?playerId=${encodeURIComponent(playerId)}` : "";
+    return app.fetch(
+      new Request(`http://localhost/api/games/${gameId}${qs}`),
+    );
+  }
+
+  it("creates a compete session with mode='compete' and lobby state", async () => {
+    const create = await app.fetch(
+      jsonReq("http://localhost/api/games", {
+        playerName: "Host",
+        mode: "compete",
+      }),
+    );
+    expect(create.status).toBe(200);
+    const data = await create.json();
+    expect(data.mode).toBe("compete");
+    expect(data.state).toBe("lobby");
+    expect(data.playerId).toBe(data.hostId);
+  });
+
+  it("each player has their own found list — submits don't leak across players", async () => {
+    const { gameId, hostId, buddyId } = await buildCompete();
+    const a = await (await submit(gameId, hostId, "tribe")).json();
+    expect(a.result).toBe("accepted");
+    expect(a.found).toEqual(["tribe"]);
+
+    // Buddy hasn't submitted anything yet — their view shows no words.
+    const buddyView = await (await getView(gameId, buddyId)).json();
+    expect(buddyView.found).toEqual([]);
+    expect(buddyView.score).toBe(0);
+
+    // Buddy can now submit the same word — each player's "already-found"
+    // set is independent.
+    const b = await (await submit(gameId, buddyId, "tribe")).json();
+    expect(b.result).toBe("accepted");
+    expect(b.found).toEqual(["tribe"]);
+  });
+
+  it("clientView returns only the viewer's own word list", async () => {
+    const { gameId, hostId, buddyId } = await buildCompete();
+    await submit(gameId, hostId, "tribe");
+    await submit(gameId, buddyId, "rebind");
+
+    const hostView = await (await getView(gameId, hostId)).json();
+    const buddyView = await (await getView(gameId, buddyId)).json();
+    expect(hostView.found).toEqual(["tribe"]);
+    expect(buddyView.found).toEqual(["rebind"]);
+  });
+
+  it("leaderboard: every player's score and foundCount visible to all viewers", async () => {
+    const { gameId, hostId, buddyId } = await buildCompete();
+    await submit(gameId, hostId, "tribe");
+    await submit(gameId, buddyId, "rebind");
+    await submit(gameId, buddyId, "trident");
+
+    const hostView = await (await getView(gameId, hostId)).json();
+    const playerById = Object.fromEntries(
+      hostView.players.map((p) => [p.playerId, p]),
+    );
+    expect(playerById[hostId].score).toBeGreaterThan(0);
+    expect(playerById[hostId].foundCount).toBe(1);
+    expect(playerById[buddyId].score).toBeGreaterThan(0);
+    expect(playerById[buddyId].foundCount).toBe(2);
+  });
+
+  it("rejects already-found per-player (re-submit by same player blocked)", async () => {
+    const { gameId, hostId } = await buildCompete();
+    await submit(gameId, hostId, "tribe");
+    const dup = await (await submit(gameId, hostId, "tribe")).json();
+    expect(dup.result).toBe("alreadyFound");
+  });
+
+  it("first-to-rank: any submit that crosses targetRank ends the game and sets winnerId", async () => {
+    // targetRank: 0 ("Start") is satisfied by any positive score, so a
+    // single submit triggers the end. The triggering player wins.
+    const create = await app.fetch(
+      jsonReq("http://localhost/api/games", {
+        playerName: "Host",
+        mode: "compete",
+        letters: "bdeint",
+        center: "r",
+        targetRank: 0,
+      }),
+    );
+    const host = await create.json();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
+        playerName: "Buddy",
+      }),
+    );
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/start`, {
+        playerId: host.playerId,
+      }),
+    );
+    await submit(host.gameId, host.playerId, "tribe");
+    const view = await (await getView(host.gameId, host.playerId)).json();
+    expect(view.ended).toBe(true);
+    expect(view.winnerId).toBe(host.playerId);
+  });
+
+  it("post-end exposes missedByMe (others' finds the viewer didn't get)", async () => {
+    const { gameId, hostId, buddyId } = await buildCompete();
+    await submit(gameId, hostId, "tribe");
+    await submit(gameId, buddyId, "rebind");
+    await submit(gameId, buddyId, "trident");
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/end`, {
+        playerId: hostId,
+      }),
+    );
+    const hostView = await (await getView(gameId, hostId)).json();
+    expect(hostView.missedByMe).toEqual({
+      rebind: buddyId,
+      trident: buddyId,
+    });
+    // Buddy's missed view excludes their own finds and includes host's.
+    const buddyView = await (await getView(gameId, buddyId)).json();
+    expect(buddyView.missedByMe).toEqual({ tribe: hostId });
+  });
+
+  it("manual end picks the highest-scoring player as winner", async () => {
+    const { gameId, hostId, buddyId } = await buildCompete();
+    await submit(gameId, hostId, "tribe"); // 5 points
+    await submit(gameId, buddyId, "rebind"); // 6 points
+    await submit(gameId, buddyId, "trident"); // 7 points
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/end`, {
+        playerId: hostId,
+      }),
+    );
+    const view = await (await getView(gameId, hostId)).json();
+    expect(view.ended).toBe(true);
+    expect(view.winnerId).toBe(buddyId);
+  });
+
+  it("WS broadcast renders a per-viewer slice (each subscriber gets their own found list)", async () => {
+    const { gameId, hostId, buddyId } = await buildCompete();
+    const hostEvents = [];
+    const buddyEvents = [];
+    const u1 = subscribeToSession(gameId, (v) => hostEvents.push(v), hostId);
+    const u2 = subscribeToSession(
+      gameId,
+      (v) => buddyEvents.push(v),
+      buddyId,
+    );
+    await submit(gameId, hostId, "tribe");
+    expect(hostEvents.at(-1).found).toEqual(["tribe"]);
+    expect(buddyEvents.at(-1).found).toEqual([]);
+    u1();
+    u2();
+  });
+});
