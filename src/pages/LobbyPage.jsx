@@ -127,13 +127,39 @@ export default function LobbyPage() {
       setCopyMsg(msg);
       setTimeout(() => setCopyMsg(""), 2000);
     };
+
+    // Modern API only works in secure contexts (HTTPS or localhost).
+    // Testing on a phone via the dev server's LAN IP fails the
+    // promise; fall back to the deprecated execCommand path which
+    // works on plain HTTP too.
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        flash(ok ? "Link copied!" : "Copy failed");
+      } catch (err) {
+        console.error("copy fallback failed:", err);
+        flash("Copy failed");
+      }
+    };
+
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(
         () => flash("Link copied!"),
-        () => flash("Copy failed"),
+        (err) => {
+          console.error("clipboard.writeText failed:", err);
+          fallback();
+        },
       );
     } else {
-      flash("Copy failed");
+      fallback();
     }
   }
 

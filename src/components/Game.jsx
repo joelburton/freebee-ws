@@ -477,6 +477,21 @@ export default function Game({
             </button>
           </div>
         </form>
+        {/* Chat lives inside .Game-board so the phone breakpoint can
+            absolutely-position the button near the input/hex grid
+            instead of the bottom-right of the viewport (where it
+            crowded the action row on small screens). On desktop the
+            button stays position:fixed and lives wherever it pleases. */}
+        {playerId && (
+          <Chat
+            ref={chatRef}
+            gameId={game.gameId}
+            playerId={playerId}
+            players={players}
+            messages={messages}
+            onTabAway={() => inputRef.current?.focus()}
+          />
+        )}
       </div>
       <aside className="Game-side">
         {isCompete && players.length > 0 ? (
@@ -484,6 +499,7 @@ export default function Game({
             players={players}
             playerId={playerId}
             winnerId={displayEnded ? winnerId : null}
+            ended={displayEnded}
           />
         ) : (
           players.length > 0 && (
@@ -538,7 +554,11 @@ export default function Game({
               )}
             </div>
             <div className="Stat-value">
-              {timerMode === "none" ? "—" : formatTime(displayTime)}
+              {timerMode === "none"
+                ? "—"
+                : paused && !displayEnded
+                  ? "PAUSE"
+                  : formatTime(displayTime)}
             </div>
           </div>
         </div>
@@ -647,50 +667,54 @@ export default function Game({
           </button>
         </div>
       </aside>
-      {playerId && (
-        <Chat
-          ref={chatRef}
-          gameId={game.gameId}
-          playerId={playerId}
-          players={players}
-          messages={messages}
-          onTabAway={() => inputRef.current?.focus()}
-        />
-      )}
     </div>
   );
 }
 
 // Compete leaderboard — sorted by score desc, with each player's name,
-// score and word count. The viewer is tagged "you" and the winner
-// (post-end only) gets a "winner" tag for a high-contrast cue beyond
-// the banner above the rank bar.
-function Leaderboard({ players, playerId, winnerId }) {
+// score and word count. The viewer is tagged "you" (hidden on phone
+// where space is tight and the player knows who they are) and post-end
+// each top-scoring player is tagged "winner" — or "tied" when the top
+// score is shared.
+function Leaderboard({ players, playerId, winnerId, ended }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
+  const topScore = sorted.length ? sorted[0].score : 0;
+  const sharedTop =
+    ended && sorted.filter((p) => p.score === topScore).length > 1;
   return (
     <ol className="Game-leaderboard" aria-label="Leaderboard">
-      {sorted.map((p) => (
-        <li
-          key={p.playerId}
-          className={`Game-leaderboard-row${
-            p.online === false ? " is-offline" : ""
-          }${p.playerId === winnerId ? " is-winner" : ""}`}
-          style={{ "--player-color": p.color }}
-        >
-          <span className="Game-roster-dot" aria-hidden="true" />
-          <span className="Game-leaderboard-name">{p.name}</span>
-          {p.playerId === playerId && (
-            <span className="Game-roster-tag">you</span>
-          )}
-          {p.playerId === winnerId && (
-            <span className="Game-roster-tag Game-roster-tag-winner">
-              winner
-            </span>
-          )}
-          <span className="Game-leaderboard-score">{p.score}</span>
-          <span className="Game-leaderboard-count">/ {p.foundCount}</span>
-        </li>
-      ))}
+      {sorted.map((p) => {
+        const atTop = ended && p.score === topScore && topScore > 0;
+        return (
+          <li
+            key={p.playerId}
+            className={`Game-leaderboard-row${
+              p.online === false ? " is-offline" : ""
+            }${p.playerId === winnerId && !sharedTop ? " is-winner" : ""}`}
+            style={{ "--player-color": p.color }}
+          >
+            <span className="Game-roster-dot" aria-hidden="true" />
+            <span className="Game-leaderboard-name">{p.name}</span>
+            {p.playerId === playerId && (
+              <span className="Game-roster-tag Game-roster-tag-you">
+                you
+              </span>
+            )}
+            {atTop && sharedTop && (
+              <span className="Game-roster-tag Game-roster-tag-tied">
+                tied
+              </span>
+            )}
+            {atTop && !sharedTop && (
+              <span className="Game-roster-tag Game-roster-tag-winner">
+                winner
+              </span>
+            )}
+            <span className="Game-leaderboard-score">{p.score}</span>
+            <span className="Game-leaderboard-count">/ {p.foundCount}</span>
+          </li>
+        );
+      })}
     </ol>
   );
 }

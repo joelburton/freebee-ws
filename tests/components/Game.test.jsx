@@ -283,9 +283,11 @@ describe("Game SSE", () => {
         "heartbeat",
       );
     });
-    // Pause state from heartbeat → Resume button visible.
+    // Pause state from heartbeat → Resume button visible. Time stat
+    // shows PAUSE rather than the (potentially wrong) clock value
+    // while the game isn't ticking.
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument();
-    expect(screen.getByText("0:30")).toBeInTheDocument();
+    expect(screen.getByText("PAUSE")).toBeInTheDocument();
   });
 
   it("ignores malformed payloads without crashing", () => {
@@ -313,7 +315,8 @@ describe("Game initial state", () => {
       />,
     );
     expect(screen.getByText("tribe")).toBeInTheDocument();
-    expect(screen.getByText("0:45")).toBeInTheDocument();
+    // Paused on mount → time stat shows PAUSE, not the clock.
+    expect(screen.getByText("PAUSE")).toBeInTheDocument();
     const sideText = document.querySelector(".Game-side").textContent;
     expect(sideText).toMatch(/5\s*\/\s*50/);
     expect(sideText).toMatch(/1\s*\/\s*4/);
@@ -744,9 +747,10 @@ describe("Game interactions", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
-    // After server response, button shows Resume and time stat reflects 0:42.
+    // After server response, button shows Resume and the time stat
+    // is replaced by the PAUSE label.
     await screen.findByRole("button", { name: "Resume" });
-    expect(screen.getByText("0:42")).toBeInTheDocument();
+    expect(screen.getByText("PAUSE")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() =>

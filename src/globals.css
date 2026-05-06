@@ -50,6 +50,11 @@ body {
     "Helvetica Neue", "Helvetica", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Stop iOS Safari's rubber-band overscroll from exposing extra page
+     background past the end of the document — it visually reads as
+     "whitespace at the bottom" even though there's no real layout
+     extending the page. */
+  overscroll-behavior: none;
 }
 
 code {
@@ -998,6 +1003,13 @@ code {
   color: #111;
 }
 
+/* Tied marker: top score is shared. Distinguished from winner by a
+   muted neutral chip rather than the accent yellow. */
+.Game-roster-tag-tied {
+  background: #ddd;
+  color: #111;
+}
+
 /* Banner shown above the rank bar at end of compete play, naming the
    winner. Plays the same role as a "Time's up!" ribbon. */
 .Game-winner {
@@ -1608,9 +1620,16 @@ code {
    ============================================================ */
 
 @media (max-width: 759px) {
-  /* ---- Page wrapper: tighter gutters on phone ---- */
+  /* ---- Page wrapper on phone: 5px top margin, content top-anchored.
+          Drop the desktop `min-height: 100dvh` so #root is exactly
+          its content height. If the viewport is larger than the
+          content, the body bg fills the gap (same color as the
+          inside-of-#root bg, so no visible seam) but the document
+          itself can't scroll past the action row. ---- */
   #root {
-    padding: 0 8px;
+    padding: 5px 8px 0;
+    min-height: 0;
+    justify-content: flex-start;
   }
 
   /* ---- Home / lobby: collapse vertical whitespace so cards fit
@@ -1668,6 +1687,29 @@ code {
 
   .Game-board {
     order: 2;
+    /* Anchor for the chat button below — on phone the button is
+       positioned absolutely against the board so it sits near the
+       input + hex grid instead of crowding the action row at the
+       bottom-right of the viewport. */
+    position: relative;
+  }
+
+  /* Chat button: tucked just below the input, right-aligned, near the
+     hex grid's NE tile. Smaller on phone since the desktop 52×52
+     would dominate. The popover keeps its default fixed positioning
+     (overlays the bottom area when open). */
+  .Chat-button {
+    position: absolute;
+    top: 56px;
+    right: 0;
+    bottom: auto;
+    width: 40px;
+    height: 40px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  }
+
+  .Chat-button-icon {
+    font-size: 20px;
   }
 
   /* Game-form gap controls input/feedback ↔ hex ↔ actions. Setting it
@@ -1696,7 +1738,11 @@ code {
      so -30 CSS-px ≈ -33.6 effective; the visible hex (top: 37 CSS-px ≈
      41.4 effective) lands ~7.8 px below the bottom of .Game-input. */
   .Letters {
-    zoom: 1.12;
+    /* 7% smaller than the previous 1.12 → buys some vertical room
+       for the page to fit without scrolling on small phones (iPhone
+       SE) where the bottom-bar overlay would otherwise hide the
+       action row. */
+    zoom: 1.04;
     margin-top: -30px;
   }
 
@@ -1713,7 +1759,9 @@ code {
   /* The word list isn't between the stats grid and the action bar on
      phone (there's no inline list — it's a popover). Drop the
      separator that would imply otherwise — both the stats's
-     bottom-border/padding/margin AND the action bar's top counterparts. */
+     bottom-border/padding/margin AND the action bar's top counterparts.
+     Keep a small breathing margin between the score/time row and the
+     buttons below so they don't visually crowd. */
   .Game-stats {
     margin-bottom: 0;
     padding-bottom: 0;
@@ -1721,9 +1769,32 @@ code {
   }
 
   .Game-side-bar {
-    margin-top: 0;
+    margin-top: 6px;
     padding-top: 0;
     border-top: 0;
+  }
+
+  /* The big "X wins!" banner above the rank bar duplicates info that
+     already shows as a "winner" tag in the leaderboard, and on phone
+     it's enough to push the page taller than the viewport. Hide it
+     here; desktop still shows it. */
+  .Game-winner {
+    display: none;
+  }
+
+  /* Phone leaderboard: lay players out in two columns since two is
+     the typical roster size, drop the "you" tag (the player knows
+     who they are), and drop the word count. The remaining "dot
+     name [tag] score" row is compact enough to fit two-up. */
+  .Game-leaderboard {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 14px;
+  }
+
+  .Game-roster-tag-you,
+  .Game-leaderboard-count {
+    display: none;
   }
 
   /* ---- Word list: phone popover ----
