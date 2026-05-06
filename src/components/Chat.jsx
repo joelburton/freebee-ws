@@ -11,15 +11,41 @@ import {
 // popover and focus the input when the player Tabs out of the word
 // box; Tab from the chat input fires `onTabAway` so the parent can
 // hand focus back.
+const READ_COUNT_KEY = (pid) => `freebee:chat-read:${pid}`;
+
+function loadReadCount(playerId) {
+  if (!playerId || typeof window === "undefined") return 0;
+  try {
+    const v = window.localStorage.getItem(READ_COUNT_KEY(playerId));
+    const n = v == null ? 0 : parseInt(v, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveReadCount(playerId, count) {
+  if (!playerId || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(READ_COUNT_KEY(playerId), String(count));
+  } catch {
+    // ignore quota / disabled
+  }
+}
+
 const Chat = forwardRef(function Chat(
   { gameId, playerId, players, messages, onTabAway },
   ref,
 ) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  // Treat any messages that are already there at mount as unread until the
-  // player explicitly opens the popover.
-  const [lastReadCount, setLastReadCount] = useState(0);
+  // Read count is keyed by playerId in localStorage so it survives the
+  // new-board transition: the parent Game component remounts on a new
+  // gameId, but the playerId carries forward, so the same backlog
+  // doesn't reappear as unread on the next board.
+  const [lastReadCount, setLastReadCount] = useState(() =>
+    loadReadCount(playerId),
+  );
   const [sending, setSending] = useState(false);
   const inputRef = useRef(null);
   const listEndRef = useRef(null);
@@ -32,10 +58,15 @@ const Chat = forwardRef(function Chat(
 
   useImperativeHandle(ref, () => ({ openAndFocus }));
 
-  // Mark all current messages read on open.
+  // Mark all current messages read on open. Persisted so a new-board
+  // re-mount with the same player + carried-over backlog doesn't
+  // re-flag those messages as unread.
   useEffect(() => {
-    if (open) setLastReadCount(messages.length);
-  }, [open, messages.length]);
+    if (open) {
+      setLastReadCount(messages.length);
+      saveReadCount(playerId, messages.length);
+    }
+  }, [open, messages.length, playerId]);
 
   // Brief preview popover shown above the chat button when a new
   // (non-important) message arrives while the chat is closed. Cleared
@@ -186,7 +217,12 @@ const Chat = forwardRef(function Chat(
             <button
               type="button"
               className="Chat-close"
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                setOpen(false);
+                // Hand focus back to the word input — closing the chat
+                // is conceptually the same as Tab-away.
+                onTabAway?.();
+              }}
               aria-label="Close chat"
             >
               ×

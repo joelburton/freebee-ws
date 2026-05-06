@@ -10,6 +10,9 @@ const players = [
 
 beforeEach(() => {
   global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+  // Chat persists per-player read counts to localStorage; clear so
+  // tests don't leak state.
+  window.localStorage.clear();
 });
 
 function renderChat(props = {}) {
@@ -39,6 +42,15 @@ describe("Chat", () => {
     expect(screen.getByRole("dialog", { name: "Chat" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close chat" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("clicking × calls onTabAway so the word input regains focus", async () => {
+    const user = userEvent.setup();
+    const onTabAway = vi.fn();
+    renderChat({ onTabAway });
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    await user.click(screen.getByRole("button", { name: "Close chat" }));
+    expect(onTabAway).toHaveBeenCalledTimes(1);
   });
 
   it("clicking the chat button focuses the message input", async () => {
@@ -88,6 +100,26 @@ describe("Chat", () => {
     expect(btn.classList.contains("has-unread")).toBe(true);
     // jsdom normalizes hex to rgb in cssText.
     expect(btn.style.cssText).toMatch(/rgb\(230, 74, 25\)/);
+  });
+
+  it("re-mounting (e.g., new board) with a previously-read backlog does NOT light up the button", async () => {
+    // Simulates the new-board flow: Game remounts on a fresh gameId,
+    // playerId carries forward, chat backlog carries forward. The
+    // already-read count must persist via localStorage.
+    const user = userEvent.setup();
+    const messages = [{ playerId: "p-buddy", text: "yo", ts: 1 }];
+    const { unmount } = renderChat({ messages });
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    expect(screen.getByRole("button", { name: "Chat" }).classList).not.toContain("has-unread");
+    unmount();
+
+    // Re-mount with the same playerId + same backlog (carried over).
+    renderChat({ messages });
+    expect(
+      screen.getByRole("button", { name: "Chat" }).classList.contains(
+        "has-unread",
+      ),
+    ).toBe(false);
   });
 
   it("a backlog containing only the viewer's own messages does NOT light up the button", () => {
