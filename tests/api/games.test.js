@@ -4,6 +4,7 @@ import {
   _resetStore,
   getSession,
   getGroup,
+  getGroupForId,
   subscribeToSession,
   pauseSession,
   resumeSession,
@@ -1581,6 +1582,53 @@ describe("Multiplayer configure flow", () => {
       timerMode: "down",
       countdownInput: "3:00",
     });
+  });
+
+  it("auto-cancels configuring after the configurator stays disconnected through the grace window", async () => {
+    vi.useFakeTimers();
+    try {
+      const { gameId, hostId } = await emptyGroup();
+      const group = getGroupForId(gameId);
+      // Host claims setup, then connects (so we have a presence to drop).
+      await app.fetch(
+        jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+          playerId: hostId,
+        }),
+      );
+      presenceConnect(group, hostId);
+      presenceDisconnect(group, hostId);
+      // Just under the grace window — still configuring.
+      vi.advanceTimersByTime(PRESENCE_GRACE_MS - 1000);
+      expect(group.configuring).not.toBeNull();
+      // Past the grace — auto-cancel fires.
+      vi.advanceTimersByTime(2000);
+      expect(group.configuring).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reconnect within grace cancels the auto-cancel", async () => {
+    vi.useFakeTimers();
+    try {
+      const { gameId, hostId } = await emptyGroup();
+      const group = getGroupForId(gameId);
+      await app.fetch(
+        jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+          playerId: hostId,
+        }),
+      );
+      presenceConnect(group, hostId);
+      presenceDisconnect(group, hostId);
+      // Halfway through the grace, host comes back.
+      vi.advanceTimersByTime(PRESENCE_GRACE_MS / 2);
+      presenceConnect(group, hostId);
+      vi.advanceTimersByTime(PRESENCE_GRACE_MS);
+      expect(group.configuring).not.toBeNull();
+      expect(group.configuring.ownerId).toBe(hostId);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("non-owner draft update is rejected (409)", async () => {

@@ -34,6 +34,10 @@ const SUBS = (globalThis.__freebeeSubs ??= new Map());
 // Pending auto-end timers (groupId → timeout handle), so a reconnect
 // during the grace window can cancel them.
 const GRACE_TIMERS = (globalThis.__freebeeGraceTimers ??= new Map());
+// Pending configure-cancel timers (groupId → handle): if the
+// configurator disconnects, after PRESENCE_GRACE_MS we clear
+// `configuring` so the next player can claim setup.
+const CONFIGURE_TIMERS = (globalThis.__freebeeConfigureTimers ??= new Map());
 
 // Grace window before auto-ending a multi game whose players have all
 // disconnected. Keep it long enough to cover a network blip but short
@@ -469,6 +473,7 @@ export function cancelConfiguring(group, playerId) {
     return { error: "Not the configurator" };
   }
   group.configuring = null;
+  cancelConfigureGrace(group.id);
   group.lastActiveAt = Date.now();
   broadcastGroup(group);
   return { ok: true };
@@ -533,6 +538,7 @@ export async function commitConfiguration(group, playerId, opts) {
   STORE.set(session.id, session);
   group.currentSessionId = session.id;
   group.configuring = null;
+  cancelConfigureGrace(group.id);
   group.lastActiveAt = Date.now();
   broadcastGroup(group);
   return session;
@@ -578,6 +584,7 @@ export function removePlayer(group, playerId) {
     GROUPS.delete(group.id);
     SUBS.delete(group.id);
     cancelGrace(group.id);
+    cancelConfigureGrace(group.id);
     return { ok: true, deleted: true };
   }
 
@@ -591,6 +598,7 @@ export function removePlayer(group, playerId) {
   }
   if (group.configuring && group.configuring.ownerId === playerId) {
     group.configuring = null;
+    cancelConfigureGrace(group.id);
   }
   group.lastActiveAt = Date.now();
   broadcastGroup(group);
@@ -603,6 +611,36 @@ function cancelGrace(groupId) {
     clearTimeout(t);
     GRACE_TIMERS.delete(groupId);
   }
+}
+
+function cancelConfigureGrace(groupId) {
+  const t = CONFIGURE_TIMERS.get(groupId);
+  if (t) {
+    clearTimeout(t);
+    CONFIGURE_TIMERS.delete(groupId);
+  }
+}
+
+// Configurator went offline. After PRESENCE_GRACE_MS, clear
+// `configuring` so other players can claim setup. Reconnect cancels
+// the timer (so a network blip doesn't strip ownership).
+function scheduleConfigureCancel(group) {
+  const groupId = group.id;
+  if (CONFIGURE_TIMERS.has(groupId)) return;
+  const t = setTimeout(() => {
+    CONFIGURE_TIMERS.delete(groupId);
+    const g = GROUPS.get(groupId);
+    if (!g || !g.configuring) return;
+    const owner = g.players.find(
+      (p) => p.playerId === g.configuring.ownerId,
+    );
+    // Owner came back during the grace and we missed cancelling — bail.
+    if (owner && owner.connections > 0) return;
+    g.configuring = null;
+    g.lastActiveAt = Date.now();
+    broadcastGroup(g);
+  }, PRESENCE_GRACE_MS);
+  CONFIGURE_TIMERS.set(groupId, t);
 }
 
 function scheduleAutoEnd(session) {
@@ -665,6 +703,9 @@ export function presenceConnect(group, playerId) {
   p.connections = (p.connections || 0) + 1;
   if (p.connections === 1) {
     cancelGrace(group.id);
+    if (group.configuring && group.configuring.ownerId === playerId) {
+      cancelConfigureGrace(group.id);
+    }
     group.lastActiveAt = Date.now();
     broadcastGroup(group);
   }
@@ -685,6 +726,9 @@ export function presenceDisconnect(group, playerId) {
       group.players.every((x) => !x.connections)
     ) {
       scheduleAutoEnd(session);
+    }
+    if (group.configuring && group.configuring.ownerId === playerId) {
+      scheduleConfigureCancel(group);
     }
     group.lastActiveAt = Date.now();
     broadcastGroup(group);
@@ -1054,6 +1098,8 @@ function broadcastGroup(group) {
 export function _resetStore() {
   for (const t of GRACE_TIMERS.values()) clearTimeout(t);
   GRACE_TIMERS.clear();
+  for (const t of CONFIGURE_TIMERS.values()) clearTimeout(t);
+  CONFIGURE_TIMERS.clear();
   STORE.clear();
   GROUPS.clear();
   SUBS.clear();
