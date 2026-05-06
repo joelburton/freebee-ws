@@ -217,8 +217,17 @@ describe("LobbyPage", () => {
       STORAGE_KEY,
       JSON.stringify({ gameId: "g1", playerId: "host-1" }),
     );
-    const active = {
+    // Start is gated on at least one friend having joined — give the
+    // host a buddy so the button isn't disabled.
+    const lobbyWithBuddy = {
       ...baseLobby,
+      players: [
+        ...baseLobby.players,
+        { playerId: "buddy-1", name: "Buddy", color: "#e64a19" },
+      ],
+    };
+    const active = {
+      ...lobbyWithBuddy,
       state: "active",
       paused: false,
       elapsed: 0,
@@ -227,7 +236,7 @@ describe("LobbyPage", () => {
       [
         (url, opts) =>
           url === "/api/games/g1" && (!opts || opts.method !== "POST"),
-        async () => ({ ok: true, json: async () => baseLobby }),
+        async () => ({ ok: true, json: async () => lobbyWithBuddy }),
       ],
       [
         (url, opts) =>
@@ -243,6 +252,51 @@ describe("LobbyPage", () => {
     await waitFor(() =>
       expect(navigateMock).toHaveBeenCalledWith("/g/g1/play"),
     );
+  });
+
+  it("host alone in the lobby: Start is disabled with a 'share link' hint", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ gameId: "g1", playerId: "host-1" }),
+    );
+    mockFetch([
+      [
+        (url) => url === "/api/games/g1",
+        async () => ({ ok: true, json: async () => baseLobby }),
+      ],
+    ]);
+    renderAt("g1");
+    const btn = await screen.findByRole("button", { name: /Start game/i });
+    expect(btn).toBeDisabled();
+    expect(
+      screen.getByText(/Waiting for friends to join/i),
+    ).toBeInTheDocument();
+  });
+
+  it("once a friend has joined, Start is enabled with a 'start when everyone arrived' hint", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ gameId: "g1", playerId: "host-1" }),
+    );
+    const lobbyWithBuddy = {
+      ...baseLobby,
+      players: [
+        ...baseLobby.players,
+        { playerId: "buddy-1", name: "Buddy", color: "#e64a19" },
+      ],
+    };
+    mockFetch([
+      [
+        (url) => url === "/api/games/g1",
+        async () => ({ ok: true, json: async () => lobbyWithBuddy }),
+      ],
+    ]);
+    renderAt("g1");
+    const btn = await screen.findByRole("button", { name: /Start game/i });
+    expect(btn).toBeEnabled();
+    expect(
+      screen.getByText(/Start the game once everyone/i),
+    ).toBeInTheDocument();
   });
 
   it("blocks strangers when the game has already started", async () => {

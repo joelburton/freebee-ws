@@ -1024,6 +1024,23 @@ describe("Multiplayer new-board", () => {
     expect(data.countdownSeconds).toBe(90);
   });
 
+  it("carries chat history forward to the new board", async () => {
+    const old = await buildEndedMulti();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${old.gameId}/chat`, {
+        playerId: old.hostId,
+        text: "good game!",
+      }),
+    );
+    const res = await newBoard(old.gameId, old.hostId);
+    const data = await res.json();
+    expect(data.messages).toHaveLength(1);
+    expect(data.messages[0]).toMatchObject({
+      playerId: old.hostId,
+      text: "good game!",
+    });
+  });
+
   it("with timerMode 'none', successor is unpaused (not stuck blurred)", async () => {
     // A "none" game has no pause/resume button, so a paused successor
     // would be unrecoverable — see newBoardFromSession.
@@ -1146,6 +1163,29 @@ describe("Multiplayer chat", () => {
     const res = await chat(gameId, hostId, longText);
     const view = await res.json();
     expect(view.messages[0].text).toHaveLength(500);
+  });
+
+  it("flags messages prefixed with '!' as important and strips the sigil", async () => {
+    const { gameId, hostId } = await multi();
+    const res = await chat(gameId, hostId, "!shall we restart?");
+    expect(res.status).toBe(200);
+    const view = await res.json();
+    expect(view.messages[0]).toMatchObject({
+      text: "shall we restart?",
+      important: true,
+    });
+  });
+
+  it("plain messages have no important flag", async () => {
+    const { gameId, hostId } = await multi();
+    const view = await (await chat(gameId, hostId, "hi")).json();
+    expect(view.messages[0].important).toBeUndefined();
+  });
+
+  it("rejects '!' on its own as empty", async () => {
+    const { gameId, hostId } = await multi();
+    const res = await chat(gameId, hostId, "!   ");
+    expect(res.status).toBe(400);
   });
 
   it("caps history at 100 messages (oldest dropped)", async () => {

@@ -1184,6 +1184,17 @@ code {
   vertical-align: middle;
 }
 
+/* Recent-find marker (multi only): a thick underline under the word
+   in the finder's color, used briefly after another player enters a
+   word so you notice it. Game.jsx adds/removes this class on a ~3s
+   timer; the inline color on the <li> drives currentColor here. */
+.WordList-recent {
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 2px;
+}
+
 /* In reveal mode (after game ends), unfound words still appear but
    muted so the player can see what they missed without confusing them
    with words they actually got. */
@@ -1371,6 +1382,41 @@ code {
   line-height: 1.2;
 }
 
+/* Brief preview shown above the chat button when a new (non-important)
+   message arrives while the popover is closed. Auto-dismisses after a
+   few seconds (Chat.jsx). pointer-events:none so it doesn't block
+   clicks on the chat button beneath. */
+.Chat-preview {
+  position: fixed;
+  right: 24px;
+  bottom: 86px;
+  max-width: 280px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 8px 12px;
+  z-index: 100;
+  font-size: 13px;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.Chat-preview-name {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.Chat-preview-text {
+  color: var(--fg);
+  word-break: break-word;
+}
+
 .Chat-popover {
   position: fixed;
   right: 24px;
@@ -1455,6 +1501,13 @@ code {
 
 .Chat-msg-text {
   word-break: break-word;
+}
+
+/* Important messages (sender prefixed text with "!"): bolded so they
+   stand out in the backlog. Auto-popping the chat window is handled
+   in Chat.jsx. */
+.Chat-message-important .Chat-msg-text {
+  font-weight: 700;
 }
 
 .Chat-form {

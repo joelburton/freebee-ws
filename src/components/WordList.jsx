@@ -16,6 +16,7 @@ export default function WordList({
   all,
   bonusSet,
   wordColors,
+  recentlyFound,
   // Optional override; tests use this to make pagination deterministic.
   // Production callers leave it undefined and let the hook below derive
   // the value from the actual rendered layout.
@@ -94,9 +95,17 @@ export default function WordList({
             if (isPangram(word)) classes.push("WordList-pangram");
             if (!foundSet.has(word)) classes.push("WordList-unfound");
             const isBonus = !!(bonusSet && bonusSet.has(word));
-            // Multi: color found words by the player who found them.
-            // Unfound (reveal-mode) words have no entry in wordColors.
+            // Multi: word text is rendered in the finder's color (so a
+            // glance at the list shows who got what); recently-added
+            // words also get a thick same-color underline that fades
+            // after a few seconds so you notice arrivals. Unfound
+            // (reveal-mode) words and solo finds have no entry in
+            // wordColors.
             const color = wordColors ? wordColors[word] : undefined;
+            const isRecent = recentlyFound
+              ? recentlyFound.has(word)
+              : false;
+            if (color && isRecent) classes.push("WordList-recent");
             return (
               <li
                 key={word}

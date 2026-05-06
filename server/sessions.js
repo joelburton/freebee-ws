@@ -331,11 +331,20 @@ export function addChatMessage(session, playerId, rawText) {
   }
   const trimmed = String(rawText || "").trim();
   if (!trimmed) return { error: "Empty message" };
-  session.messages.push({
+  // Leading "!" marks an important message: bolded in the chat list,
+  // and the client auto-opens its chat popover on arrival. Strip the
+  // sigil so it doesn't appear in the rendered text. A bare "!" with
+  // no body is rejected like an empty message.
+  const important = trimmed.startsWith("!");
+  const text = important ? trimmed.slice(1).trim() : trimmed;
+  if (!text) return { error: "Empty message" };
+  const msg = {
     playerId,
-    text: trimmed.slice(0, MAX_CHAT_LEN),
+    text: text.slice(0, MAX_CHAT_LEN),
     ts: Date.now(),
-  });
+  };
+  if (important) msg.important = true;
+  session.messages.push(msg);
   // Bound the backlog so long sessions don't grow unbounded.
   if (session.messages.length > MAX_MESSAGES) {
     session.messages = session.messages.slice(-MAX_MESSAGES);
@@ -410,7 +419,10 @@ export async function newBoardFromSession(oldSession) {
       joinedAt: now,
     })),
     foundBy: {},
-    messages: [],
+    // Carry chat backlog forward — same group, same conversation. Player
+    // ids in the roster are preserved (see players map above), so name +
+    // color attribution still resolves on the client.
+    messages: oldSession.messages.slice(),
     letters: board.letters,
     center: board.center,
     words: board.words,

@@ -116,6 +116,56 @@ export default function Game({
     [game.letters, game.center],
   );
 
+  // Words that just arrived in `found` get a 5-second "recently added"
+  // underline in the WordList. `knownFoundRef` records what was already
+  // present so the *initial* render (or a reconnect with a populated
+  // `found` array) doesn't flash on every existing word.
+  //
+  // Timers live in a ref keyed by word — NOT in the effect's cleanup.
+  // The submitter's path triggers `setFound` twice in quick succession
+  // (immediate response from /submit, then the WS broadcast a tick
+  // later); a per-effect cleanup would cancel the just-scheduled timer
+  // when the second update fires, leaving the underline stuck on
+  // forever. Per-word timers are independent and fire reliably.
+  const [recentlyFound, setRecentlyFound] = useState(() => new Set());
+  const knownFoundRef = useRef(new Set(found));
+  const recentTimersRef = useRef(new Map());
+  useEffect(() => {
+    const known = knownFoundRef.current;
+    const fresh = found.filter((w) => !known.has(w));
+    if (fresh.length === 0) return;
+    knownFoundRef.current = new Set(found);
+    setRecentlyFound((cur) => {
+      const next = new Set(cur);
+      fresh.forEach((w) => next.add(w));
+      return next;
+    });
+    fresh.forEach((w) => {
+      const existing = recentTimersRef.current.get(w);
+      if (existing) clearTimeout(existing);
+      const id = setTimeout(() => {
+        recentTimersRef.current.delete(w);
+        setRecentlyFound((cur) => {
+          if (!cur.has(w)) return cur;
+          const next = new Set(cur);
+          next.delete(w);
+          return next;
+        });
+      }, 5000);
+      recentTimersRef.current.set(w, id);
+    });
+  }, [found]);
+
+  // Clear any pending recent-fade timers on unmount. (No per-effect
+  // cleanup above — see comment on the timers ref.)
+  useEffect(
+    () => () => {
+      recentTimersRef.current.forEach((id) => clearTimeout(id));
+      recentTimersRef.current.clear();
+    },
+    [],
+  );
+
   // Server is authoritative for game state. Solo persists just the
   // gameId; multi persists {gameId, playerId} so a refresh of /g/<id>
   // can reconnect to the same roster slot. Without preserving playerId
@@ -446,6 +496,7 @@ export default function Game({
             all={displayEnded ? revealList : null}
             bonusSet={bonusSet}
             wordColors={wordColors}
+            recentlyFound={recentlyFound}
             showNav={false}
             onPagination={setWordPagination}
           />

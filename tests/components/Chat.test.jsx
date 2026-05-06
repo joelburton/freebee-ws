@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Chat from "../../src/components/Chat";
@@ -39,6 +39,15 @@ describe("Chat", () => {
     expect(screen.getByRole("dialog", { name: "Chat" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close chat" }));
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("clicking the chat button focuses the message input", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Type a message")).toHaveFocus(),
+    );
   });
 
   it("renders messages with sender name in player color", async () => {
@@ -101,6 +110,153 @@ describe("Chat", () => {
     input.focus();
     await user.keyboard("{Tab}");
     expect(onTabAway).toHaveBeenCalledTimes(1);
+  });
+
+  it("important messages render with the bold modifier class", async () => {
+    const user = userEvent.setup();
+    const messages = [
+      { playerId: "p-buddy", text: "shall we start?", ts: 1, important: true },
+    ];
+    renderChat({ messages });
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    const li = screen.getByText("shall we start?").closest("li");
+    expect(li.classList.contains("Chat-message-important")).toBe(true);
+  });
+
+  it("auto-opens the popover when a new important message arrives", async () => {
+    function Harness() {
+      const [messages, setMessages] = useState([]);
+      return (
+        <>
+          <button
+            onClick={() =>
+              setMessages([
+                { playerId: "p-buddy", text: "I need to leave", ts: 1, important: true },
+              ])
+            }
+          >
+            push
+          </button>
+          <Chat
+            gameId="g1"
+            playerId="p-host"
+            players={players}
+            messages={messages}
+            onTabAway={() => {}}
+          />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(screen.getByText("push"));
+    expect(screen.getByRole("dialog", { name: "Chat" })).toBeInTheDocument();
+  });
+
+  it("flashes a preview popover when a new message arrives while closed", async () => {
+    function Harness() {
+      const [messages, setMessages] = useState([]);
+      return (
+        <>
+          <button
+            onClick={() =>
+              setMessages([
+                { playerId: "p-buddy", text: "hey wanna play another?", ts: 1 },
+              ])
+            }
+          >
+            push
+          </button>
+          <Chat
+            gameId="g1"
+            playerId="p-host"
+            players={players}
+            messages={messages}
+            onTabAway={() => {}}
+          />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.click(screen.getByText("push"));
+    const preview = screen.getByRole("status");
+    expect(preview).toHaveTextContent("Buddy");
+    expect(preview).toHaveTextContent("hey wanna play another?");
+  });
+
+  it("opening the chat hides the preview", async () => {
+    function Harness() {
+      const [messages, setMessages] = useState([]);
+      return (
+        <>
+          <button
+            onClick={() =>
+              setMessages([
+                { playerId: "p-buddy", text: "yo", ts: 1 },
+              ])
+            }
+          >
+            push
+          </button>
+          <Chat
+            gameId="g1"
+            playerId="p-host"
+            players={players}
+            messages={messages}
+            onTabAway={() => {}}
+          />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByText("push"));
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("important arrivals open the chat instead of flashing a preview", async () => {
+    function Harness() {
+      const [messages, setMessages] = useState([]);
+      return (
+        <>
+          <button
+            onClick={() =>
+              setMessages([
+                { playerId: "p-buddy", text: "go!", ts: 1, important: true },
+              ])
+            }
+          >
+            push
+          </button>
+          <Chat
+            gameId="g1"
+            playerId="p-host"
+            players={players}
+            messages={messages}
+            onTabAway={() => {}}
+          />
+        </>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByText("push"));
+    // No preview — chat opened directly.
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Chat" })).toBeInTheDocument();
+  });
+
+  it("does not auto-open on initial mount even if backlog ends with an important message", () => {
+    const messages = [
+      { playerId: "p-buddy", text: "old important", ts: 1, important: true },
+    ];
+    renderChat({ messages });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("ref.openAndFocus opens the popover and focuses the input", async () => {

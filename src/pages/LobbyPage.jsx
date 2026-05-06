@@ -240,14 +240,21 @@ export default function LobbyPage() {
           {copyMsg || "Copy share link"}
         </button>
         {isHost ? (
-          <button
-            type="button"
-            className="App-start-go"
-            onClick={handleStart}
-            disabled={busy}
-          >
-            Start game
-          </button>
+          <>
+            <button
+              type="button"
+              className="App-start-go"
+              onClick={handleStart}
+              disabled={busy || game.players.length < 2}
+            >
+              Start game
+            </button>
+            <p className="App-multi-waiting">
+              {game.players.length < 2
+                ? "Waiting for friends to join — share the link above."
+                : "Start the game once everyone you invited has arrived."}
+            </p>
+          </>
         ) : (
           <p className="App-multi-waiting">
             Waiting for {hostName(game)} to start…

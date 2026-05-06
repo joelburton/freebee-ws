@@ -24,18 +24,75 @@ const Chat = forwardRef(function Chat(
   const inputRef = useRef(null);
   const listEndRef = useRef(null);
 
-  useImperativeHandle(ref, () => ({
-    openAndFocus: () => {
-      setOpen(true);
-      // Focus has to wait until the popover renders.
-      setTimeout(() => inputRef.current?.focus(), 0);
-    },
-  }));
+  function openAndFocus() {
+    setOpen(true);
+    // Focus has to wait until the popover renders.
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  useImperativeHandle(ref, () => ({ openAndFocus }));
 
   // Mark all current messages read on open.
   useEffect(() => {
     if (open) setLastReadCount(messages.length);
   }, [open, messages.length]);
+
+  // Brief preview popover shown above the chat button when a new
+  // (non-important) message arrives while the chat is closed. Cleared
+  // by a timer or by the chat being opened.
+  const [preview, setPreview] = useState(null);
+  const previewTimerRef = useRef(null);
+
+  // React to new messages: important → auto-open, otherwise (if closed)
+  // flash a preview. Track the previous count so we only react to *new*
+  // messages — without this, the popover would re-open every time the
+  // parent re-renders an existing important message, and it would pop
+  // on initial mount whenever the latest backlog message happens to be
+  // important.
+  const prevCountRef = useRef(messages.length);
+  useEffect(() => {
+    const prev = prevCountRef.current;
+    prevCountRef.current = messages.length;
+    if (messages.length <= prev) return;
+    const arrived = messages.slice(prev);
+    if (arrived.some((m) => m.important)) {
+      setOpen(true);
+      return;
+    }
+    if (open) return;
+    const last = arrived[arrived.length - 1];
+    const sender = players.find((p) => p.playerId === last.playerId);
+    setPreview({
+      name: sender?.name || "?",
+      color: sender?.color,
+      text:
+        last.text.length > 60 ? `${last.text.slice(0, 57)}…` : last.text,
+    });
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => setPreview(null), 4000);
+    // `players` is intentionally excluded — we only want to flash a
+    // preview when the message list actually changes, not on roster
+    // re-renders that don't add a message.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
+
+  // Hide the preview when the chat opens (it's about to show the full
+  // message anyway), and clean up on unmount.
+  useEffect(() => {
+    if (!open) return;
+    setPreview(null);
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+  }, [open]);
+
+  useEffect(
+    () => () => {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    },
+    [],
+  );
 
   // Auto-scroll to the bottom whenever a new message lands while open.
   useEffect(() => {
@@ -86,10 +143,18 @@ const Chat = forwardRef(function Chat(
 
   return (
     <>
+      {preview && !open && (
+        <div className="Chat-preview" role="status" aria-live="polite">
+          <span className="Chat-preview-name" style={{ color: preview.color }}>
+            {preview.name}
+          </span>
+          <span className="Chat-preview-text">{preview.text}</span>
+        </div>
+      )}
       <button
         type="button"
         className={`Chat-button${unreadColor ? " has-unread" : ""}`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? setOpen(false) : openAndFocus())}
         style={
           unreadColor
             ? { background: unreadColor, borderColor: unreadColor }
@@ -127,7 +192,10 @@ const Chat = forwardRef(function Chat(
             {messages.map((msg, i) => {
               const p = playerById.get(msg.playerId);
               return (
-                <li key={i} className="Chat-message">
+                <li
+                  key={i}
+                  className={`Chat-message${msg.important ? " Chat-message-important" : ""}`}
+                >
                   <span
                     className="Chat-msg-name"
                     style={{ color: p?.color }}

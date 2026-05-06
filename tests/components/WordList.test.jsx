@@ -41,6 +41,35 @@ describe("WordList", () => {
     expect(screen.getByText("trident")).toHaveClass("WordList-unfound");
   });
 
+  it("renders word text in the finder's color and adds the recent-underline class only for recently-added words", () => {
+    const { container } = render(
+      <WordList
+        found={["tribe", "rebind"]}
+        wordColors={{ tribe: "#1976d2", rebind: "#1976d2" }}
+        recentlyFound={new Set(["tribe"])}
+      />,
+    );
+    const items = Array.from(container.querySelectorAll(".WordList li"));
+    const tribe = items.find((li) => li.textContent.startsWith("tribe"));
+    const rebind = items.find((li) => li.textContent.startsWith("rebind"));
+    // jsdom normalizes hex to rgb for inline styles.
+    expect(tribe.style.color).toBe("rgb(25, 118, 210)");
+    expect(rebind.style.color).toBe("rgb(25, 118, 210)");
+    // Only the recent one carries the underline marker.
+    expect(tribe.classList.contains("WordList-recent")).toBe(true);
+    expect(rebind.classList.contains("WordList-recent")).toBe(false);
+  });
+
+  it("no recent-underline when wordColors is missing (solo)", () => {
+    const { container } = render(
+      <WordList
+        found={["tribe"]}
+        recentlyFound={new Set(["tribe"])}
+      />,
+    );
+    expect(container.querySelector(".WordList-recent")).toBeNull();
+  });
+
   it("marks words in bonusSet with a bonus dot", () => {
     const { container } = render(
       <WordList
