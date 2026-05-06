@@ -161,7 +161,11 @@ describe("PlayPage", () => {
     );
   });
 
-  it("'New board' on an ended game POSTs /new-board and navigates", async () => {
+  it("'New board' on an ended game POSTs /new-board; URL stays the same and the view flips back to active via WS", async () => {
+    // Under the group model, new-board doesn't change the URL — the
+    // group's URL is stable, and the same gameId now points at a fresh
+    // session. The successor state arrives via WS (or the POST
+    // response, applied by <Game>) and the screen updates in place.
     const ended = {
       ...baseActive,
       state: "ended",
@@ -170,13 +174,15 @@ describe("PlayPage", () => {
     };
     const successor = {
       ...baseActive,
-      gameId: "g2",
+      sessionId: "s2",
       state: "active",
+      ended: false,
     };
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ gameId: "g1", playerId: "host-1" }),
     );
+    const newBoardCalls = [];
     mockFetch([
       [
         (url, opts) =>
@@ -186,23 +192,27 @@ describe("PlayPage", () => {
       [
         (url, opts) =>
           url === "/api/games/g1/new-board" && opts?.method === "POST",
-        async () => ({ ok: true, json: async () => successor }),
+        async () => {
+          newBoardCalls.push(true);
+          return { ok: true, json: async () => successor };
+        },
       ],
     ]);
     const user = userEvent.setup();
     renderAt("g1");
     await screen.findByRole("button", { name: /New board/i });
     await user.click(screen.getByRole("button", { name: /New board/i }));
-    await waitFor(() =>
-      expect(navigateMock).toHaveBeenCalledWith("/g/g2/play"),
-    );
+    await waitFor(() => expect(newBoardCalls).toHaveLength(1));
+    // No navigation away from the URL: same group, same path.
+    expect(navigateMock).not.toHaveBeenCalled();
+    // localStorage stays put — gameId didn't change.
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY))).toEqual({
-      gameId: "g2",
+      gameId: "g1",
       playerId: "host-1",
     });
   });
 
-  it("non-clicker is also brought forward when nextGameId arrives via WS", async () => {
+  it("WS push of a fresh session (same gameId) on an ended game flips the view back to active in place", async () => {
     const ended = {
       ...baseActive,
       state: "ended",
@@ -231,13 +241,12 @@ describe("PlayPage", () => {
       s.url.startsWith("ws://localhost:3000/ws/g1"),
     );
     act(() => {
-      ws.emit({ ...ended, nextGameId: "g2" });
+      ws.emit({ ...baseActive, sessionId: "s2", state: "active", ended: false });
     });
-    await waitFor(() =>
-      expect(navigateMock).toHaveBeenCalledWith("/g/g2/play"),
-    );
+    // No navigation; the URL is stable across sessions in the same group.
+    expect(navigateMock).not.toHaveBeenCalled();
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY))).toEqual({
-      gameId: "g2",
+      gameId: "g1",
       playerId: "host-1",
     });
   });

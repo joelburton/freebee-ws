@@ -2,6 +2,7 @@ import {
   createRandomSession,
   createCustomSession,
   getSession,
+  getGroup,
   getMember,
   isHost,
   isMultiplayer,
@@ -73,12 +74,13 @@ export function registerApiRoutes(app) {
       if (session.error) return c.json({ error: session.error }, 400);
     } else {
       session = await createRandomSession(opts);
+      if (session.error) return c.json({ error: session.error }, 400);
     }
 
-    const view = clientView(session, session.hostId);
-    if (session.mode === "multi" || session.mode === "compete") {
-      view.playerId = session.hostId;
-    }
+    const group = getGroup(session);
+    const hostId = group ? group.hostId : null;
+    const view = clientView(session, hostId);
+    if (group) view.playerId = hostId;
     return c.json(view);
   });
 

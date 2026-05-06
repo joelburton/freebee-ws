@@ -39,7 +39,6 @@ export default function Game({
   game,
   onNewGame,
   onResetSetup,
-  onNextGame,
   playerId = null,
 }) {
   const [found, setFound] = useState(game.found || []);
@@ -249,9 +248,8 @@ export default function Game({
       }
     });
     return () => ws.close();
-    // applyServerView closes over current state setters and onNextGame;
-    // we only want to reopen the socket on gameId/playerId change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // applyServerView closes over current state setters; we only want
+    // to reopen the socket on gameId/playerId change.
   }, [game.gameId, playerId]);
 
   // Apply a server response that includes a clientView (pause/resume/end
@@ -273,10 +271,6 @@ export default function Game({
     // Compete only — winnerId on end, missedByMe on the post-end view.
     if (data.winnerId !== undefined) setWinnerId(data.winnerId || null);
     if (data.missedByMe !== undefined) setMissedByMe(data.missedByMe);
-    // Multi: server creates a successor session when someone clicks
-    // "New board" on the ended game. Surface that to the parent loader
-    // so every connected player can be brought forward.
-    if (data.nextGameId && onNextGame) onNextGame(data.nextGameId);
   }
 
   async function endGameOnServer() {

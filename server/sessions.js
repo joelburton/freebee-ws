@@ -9,13 +9,29 @@ import {
 } from "./game.js";
 import { currentRankIndex } from "../shared/ranks.js";
 
+// ===========================================================================
+// Phase 1 data model: a Group is the persistent entity that friends share;
+// a Session is a single playthrough inside a group. Solo has no group.
+//
+// - Group holds identity + things that should outlive a single board:
+//   players (identity, color, presence), chat backlog, currentSessionId.
+// - Session holds the board, per-game word state, timer, and per-player
+//   *game* state (compete scores) keyed by playerId.
+// - URL id for multi = group.id. URL id for solo = session.id. The two
+//   never collide (pickUrlId checks both maps before handing one out).
+// - WS subscribers are keyed by URL id, so chat (group-level) and submits
+//   (session-level) both fan out to the same listeners.
+// ===========================================================================
+
 // HMR-safe: surviving dev hot reloads keeps in-flight games intact.
 const STORE = (globalThis.__freebeeSessions ??= new Map());
-// Per-session subscriber registry. Key: session id; value: Set<send fn>.
-// The send fn is transport-agnostic — the WS layer registers a callback
-// that pushes the latest clientView to its socket.
+const GROUPS = (globalThis.__freebeeGroups ??= new Map());
+// Per-URL-id subscriber registry. Key: group.id (multi) or session.id
+// (solo); value: Set<{send, viewerId}>. The send fn is transport-
+// agnostic — the WS layer registers a callback that pushes the latest
+// clientView to its socket.
 const SUBS = (globalThis.__freebeeSubs ??= new Map());
-// Pending auto-end timers (sessionId → timeout handle), so a reconnect
+// Pending auto-end timers (groupId → timeout handle), so a reconnect
 // during the grace window can cancel them.
 const GRACE_TIMERS = (globalThis.__freebeeGraceTimers ??= new Map());
 
@@ -24,8 +40,8 @@ const GRACE_TIMERS = (globalThis.__freebeeGraceTimers ??= new Map());
 // enough that an abandoned game doesn't tie up a session for hours.
 export const PRESENCE_GRACE_MS = 30_000;
 
-// Sessions are evicted after 24h of inactivity. Sweep runs lazily, at most
-// once every SWEEP_INTERVAL_MS, on getSession (the most-trafficked path).
+// Sessions/groups are evicted after 24h of inactivity. Sweep runs lazily,
+// at most once every SWEEP_INTERVAL_MS, on the lookup hot path.
 export const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 let lastSweepAt = 0;
@@ -71,14 +87,10 @@ function newId() {
   return globalThis.crypto.randomUUID();
 }
 
-// Game IDs appear in shareable URLs (/g/<id>, /p/<id>), so we want
-// something a friend can read off an SMS without typos. Two short words
-// joined by a hyphen ("penguin-orange") gives ~hundreds of thousands of
-// combinations against a typical handful of concurrent active games —
-// collisions are vanishingly rare, but we retry just in case. The pool
-// is the scoring word list (smaller, higher-quality SCOWL) filtered to
-// 4–6 letters for typeability.
-function buildGameIdPool(data) {
+// Shareable URL ids: two short words ("penguin-orange") that read off
+// SMS without typos. The pool is the scoring word list (smaller, higher-
+// quality SCOWL) filtered to 4–6 letters.
+function buildIdPool(data) {
   const pool = [];
   for (let i = 0; i < data.words.length; i++) {
     if (!data.inScoring[i]) continue;
@@ -88,15 +100,17 @@ function buildGameIdPool(data) {
   return pool;
 }
 
-let gameIdPool = null;
-function pickGameId(data) {
-  if (!gameIdPool) gameIdPool = buildGameIdPool(data);
-  const pool = gameIdPool;
+let idPool = null;
+function pickUrlId(data) {
+  if (!idPool) idPool = buildIdPool(data);
+  const pool = idPool;
   for (let i = 0; i < 50; i++) {
     const a = pool[Math.floor(Math.random() * pool.length)];
     const b = pool[Math.floor(Math.random() * pool.length)];
     const id = `${a}-${b}`;
-    if (!STORE.has(id)) return id;
+    // Both namespaces share the URL id space — solo session ids and
+    // multi group ids must not collide.
+    if (!STORE.has(id) && !GROUPS.has(id)) return id;
   }
   // Defensive: if we somehow keep colliding, suffix with a UUID slice
   // so we never hand back a duplicate.
@@ -120,13 +134,19 @@ function makePlayer(name, color) {
     name: cleanName || "Player",
     color,
     // Active WS connections for this player. online === connections > 0.
-    // Joined-but-not-yet-connected players (e.g., between /join and the
-    // browser opening the socket) read as offline until they connect.
+    // Joined-but-not-yet-connected players read as offline until they
+    // actually open a socket. Lives on the *group*: presence is a
+    // property of the player's relationship to the group, not to any
+    // individual game inside it.
     connections: 0,
     joinedAt: Date.now(),
-    // Per-player word state. Used by compete mode (each player has
-    // their own list); co-op leaves these empty and uses the
-    // session-level versions instead.
+  };
+}
+
+// Per-session per-player game state for compete mode. Co-op never reads
+// these; solo has no players at all.
+function emptyPlayerState() {
+  return {
     found: [],
     foundSet: new Set(),
     bonusFound: [],
@@ -134,51 +154,38 @@ function makePlayer(name, color) {
   };
 }
 
-function buildSession(board, opts = {}, id) {
+function getPlayerState(session, playerId) {
+  let s = session.playerState[playerId];
+  if (!s) {
+    s = emptyPlayerState();
+    session.playerState[playerId] = s;
+  }
+  return s;
+}
+
+function buildSession(board, opts, groupId) {
   const {
     timerMode = "up",
     countdownSeconds = 0,
-    playerName, // presence implies a multiplayer session (co-op or compete)
-    // Three valid modes: "solo", "multi" (co-op), "compete". A
-    // playerName must accompany "multi" / "compete". If `mode` is
-    // missing, infer from playerName: present → "multi", absent → "solo".
-    // Compete-only options:
-    //   targetRank: index into RANKS (e.g. 6 for Genius). When set, the
-    //     game ends as soon as any player reaches that rank.
-    mode: requestedMode,
+    mode = "solo",
     targetRank,
   } = opts;
   const now = Date.now();
-  const isMulti = playerName != null;
-  const mode = requestedMode || (isMulti ? "multi" : "solo");
+  const isMulti = mode === "multi" || mode === "compete";
   const isCompete = mode === "compete";
 
-  const players = [];
-  let hostId = null;
-  if (isMulti) {
-    const host = makePlayer(playerName, PLAYER_COLORS[0]);
-    players.push(host);
-    hostId = host.playerId;
-  }
-
-  // Multiplayer sessions (co-op + compete) start in "lobby" with
-  // paused=true (the lobby is semantically "the game hasn't started").
-  // Solo never starts paused — including when timerMode is "none". A
-  // "none" game has no clock to tick, but the player should still be
-  // able to submit words.
+  // Multiplayer sessions start in "lobby" with paused=true. Solo starts
+  // active and unpaused — even with timerMode "none" the player should
+  // still be able to submit words.
   const startPaused = isMulti;
   const timerRunning = !startPaused && timerMode !== "none";
 
   return {
-    id,
+    id: newId(), // internal id; URL id for multi is the group's
+    groupId, // null for solo
     mode,
     state: isMulti ? "lobby" : "active",
-    hostId,
-    players,
-    // word → playerId attribution. Solo never writes here.
-    foundBy: {},
-    // Chat backlog (multi only). {playerId, text, ts}; capped at 100.
-    messages: [],
+    foundBy: {}, // word → playerId (co-op attribution)
     letters: board.letters,
     center: board.center,
     words: board.words,
@@ -193,16 +200,12 @@ function buildSession(board, opts = {}, id) {
     ended: false,
     timerMode,
     countdownSeconds,
-    // Timer state. `startedAt` is the wall-clock anchor for the *current*
-    // running interval (null when paused/ended). `accumulatedMs` holds the
-    // total of all completed running intervals. Elapsed = accumulatedMs +
-    // (now - startedAt) when running, else accumulatedMs.
     paused: startPaused,
     startedAt: timerRunning ? now : null,
     accumulatedMs: 0,
-    // Compete-only: index into RANKS at which the game ends. null for
-    // solo / co-op (those rely on countdown or manual end).
     targetRank: isCompete ? (targetRank ?? null) : null,
+    // Compete: per-player game state, keyed by playerId. Empty for co-op.
+    playerState: {},
     createdAt: now,
     lastActiveAt: now,
   };
@@ -210,23 +213,29 @@ function buildSession(board, opts = {}, id) {
 
 function touch(session) {
   session.lastActiveAt = Date.now();
+  if (session.groupId) {
+    const g = GROUPS.get(session.groupId);
+    if (g) g.lastActiveAt = session.lastActiveAt;
+  }
 }
 
-// Lazy sweep: at most once every SWEEP_INTERVAL_MS, drop sessions whose
-// lastActiveAt is older than SESSION_TTL_MS. Cheap when nothing's expired.
+// Lazy sweep: at most once every SWEEP_INTERVAL_MS, drop sessions and
+// groups whose lastActiveAt is older than SESSION_TTL_MS.
 function maybeSweep() {
   const now = Date.now();
   if (now - lastSweepAt < SWEEP_INTERVAL_MS) return;
   lastSweepAt = now;
   for (const [id, s] of STORE) {
-    if (now - s.lastActiveAt > SESSION_TTL_MS) {
-      STORE.delete(id);
+    if (now - s.lastActiveAt > SESSION_TTL_MS) STORE.delete(id);
+  }
+  for (const [id, g] of GROUPS) {
+    if (now - g.lastActiveAt > SESSION_TTL_MS) {
+      GROUPS.delete(id);
       SUBS.delete(id);
     }
   }
 }
 
-// Returns elapsed milliseconds based on the session's timer state.
 function elapsedMs(session) {
   if (session.paused || session.ended || session.startedAt == null) {
     return session.accumulatedMs;
@@ -246,7 +255,6 @@ function snapshotElapsed(session) {
 function maybeAutoEnd(session) {
   if (session.ended) return false;
   if (session.timerMode !== "down") return false;
-  // Countdown only ticks once started, so don't auto-end a multi lobby.
   if (session.state !== "active") return false;
   const limitMs = session.countdownSeconds * 1000;
   if (elapsedMs(session) < limitMs) return false;
@@ -259,11 +267,63 @@ function maybeAutoEnd(session) {
   return true;
 }
 
+// The id used for URLs and WS subscriptions: group.id for multi,
+// session.id for solo.
+function urlIdOf(session) {
+  return session.groupId ?? session.id;
+}
+
+// --- Lookup ---
+
+// Resolve a URL id to its current session. For solo, the id IS the
+// session id. For multi, the id is a group id and we hand back the
+// group's currentSession.
+export function getSession(id) {
+  maybeSweep();
+  // Solo path: the URL id is the session id directly.
+  const direct = STORE.get(id);
+  if (direct && direct.groupId == null) {
+    maybeAutoEnd(direct);
+    touch(direct);
+    return direct;
+  }
+  // Multi path: URL id is a group id.
+  const group = GROUPS.get(id);
+  if (!group) return null;
+  const s = STORE.get(group.currentSessionId);
+  if (!s) return null;
+  maybeAutoEnd(s);
+  touch(s);
+  return s;
+}
+
+export function getGroup(session) {
+  return session.groupId ? GROUPS.get(session.groupId) ?? null : null;
+}
+
+// --- Multiplayer membership helpers ---
+
+export function isMultiplayer(session) {
+  return session.mode === "multi" || session.mode === "compete";
+}
+
+export function getMember(session, playerId) {
+  if (!playerId || !isMultiplayer(session)) return null;
+  const group = getGroup(session);
+  if (!group) return null;
+  return group.players.find((p) => p.playerId === playerId) || null;
+}
+
+export function isHost(session, playerId) {
+  const group = getGroup(session);
+  return !!(group && group.hostId === playerId);
+}
+
+// --- Creation ---
+
 export async function createRandomSession(opts = {}) {
   const data = await loadData();
-  const session = buildSession(makeGame(data), opts, pickGameId(data));
-  STORE.set(session.id, session);
-  return session;
+  return createSession(opts, () => makeGame(data), data);
 }
 
 export async function createCustomSession({ letters, center, ...opts }) {
@@ -274,95 +334,117 @@ export async function createCustomSession({ letters, center, ...opts }) {
   if (board.wordlist.length === 0) {
     return { error: "No valid words for these letters" };
   }
-  const session = buildSession(board, opts, pickGameId(data));
-  STORE.set(session.id, session);
+  return createSession(opts, () => board, data);
+}
+
+// Internal: shared path for random + custom. Builds the session, and if
+// it's multiplayer, builds the surrounding group (host = the creator).
+function createSession(rawOpts, makeBoard, data) {
+  const { playerName, ...rest } = rawOpts;
+  const cleanName =
+    typeof playerName === "string" && playerName.trim()
+      ? playerName.trim()
+      : null;
+  const requestedMode = rest.mode;
+  // Mode inference: explicit `mode` wins; otherwise playerName presence
+  // implies "multi".
+  const mode =
+    requestedMode === "solo" ||
+    requestedMode === "multi" ||
+    requestedMode === "compete"
+      ? requestedMode
+      : cleanName
+        ? "multi"
+        : "solo";
+  const isMulti = mode === "multi" || mode === "compete";
+
+  if (isMulti) {
+    if (!cleanName) return { error: "Player name required for multiplayer" };
+    const host = makePlayer(cleanName, PLAYER_COLORS[0]);
+    const id = pickUrlId(data);
+    const now = Date.now();
+    const group = {
+      id,
+      hostId: host.playerId,
+      players: [host],
+      messages: [], // persists across sessions in this group.
+      currentSessionId: null, // set below
+      createdAt: now,
+      lastActiveAt: now,
+    };
+    GROUPS.set(id, group);
+    const session = buildSession(makeBoard(), { ...rest, mode }, id);
+    STORE.set(session.id, session);
+    group.currentSessionId = session.id;
+    return session;
+  }
+
+  // Solo: URL id = session id. pickUrlId checks both maps for collisions.
+  const session = buildSession(makeBoard(), { ...rest, mode: "solo" }, null);
+  const id = pickUrlId(data);
+  session.id = id;
+  STORE.set(id, session);
   return session;
 }
 
-// Always run maybeAutoEnd before reading state, so a session whose
-// countdown expired without anyone hitting an endpoint reports as ended.
-// Touching keeps the session alive against TTL eviction.
-export function getSession(id) {
-  maybeSweep();
-  const s = STORE.get(id);
-  if (!s) return null;
-  maybeAutoEnd(s);
-  touch(s);
-  return s;
-}
+// --- Player join / lifecycle ---
 
-// --- Multiplayer membership helpers ---
-
-// True for any session with a player roster (co-op + compete). Use this
-// instead of `mode === "multi"` for guards that care about "is there a
-// roster / lobby / host?".
-export function isMultiplayer(session) {
-  return session.mode === "multi" || session.mode === "compete";
-}
-
-// Returns the player record for a given playerId, or null. Solo sessions
-// always return null since they have no roster.
-export function getMember(session, playerId) {
-  if (!playerId || !isMultiplayer(session)) return null;
-  return session.players.find((p) => p.playerId === playerId) || null;
-}
-
-export function isHost(session, playerId) {
-  return isMultiplayer(session) && session.hostId === playerId;
-}
-
-// Add a player to a multiplayer session that is still in lobby state.
-// Returns { player } on success or { error } on failure.
+// Add a player to a multiplayer group. Lobby-state only. The session
+// the group currently points at must be in lobby — once active, the
+// roster is locked.
 export function addPlayer(session, name) {
   if (!isMultiplayer(session)) return { error: "Not a multiplayer game" };
   if (session.state !== "lobby") return { error: "Game already started" };
+  const group = getGroup(session);
+  if (!group) return { error: "Group missing" };
   const cleanName = String(name || "").trim();
   if (!cleanName) return { error: "Name required" };
-  const player = makePlayer(cleanName, nextColor(session.players));
-  session.players.push(player);
+  const player = makePlayer(cleanName, nextColor(group.players));
+  group.players.push(player);
   touch(session);
   broadcast(session);
   return { player };
 }
 
-function cancelGrace(sessionId) {
-  const t = GRACE_TIMERS.get(sessionId);
+function cancelGrace(groupId) {
+  const t = GRACE_TIMERS.get(groupId);
   if (t) {
     clearTimeout(t);
-    GRACE_TIMERS.delete(sessionId);
+    GRACE_TIMERS.delete(groupId);
   }
 }
 
 function scheduleAutoEnd(session) {
-  if (GRACE_TIMERS.has(session.id)) return;
-  const id = session.id;
+  const groupId = session.groupId;
+  if (!groupId) return;
+  if (GRACE_TIMERS.has(groupId)) return;
   const t = setTimeout(() => {
-    GRACE_TIMERS.delete(id);
-    const s = STORE.get(id);
+    GRACE_TIMERS.delete(groupId);
+    const group = GROUPS.get(groupId);
+    if (!group) return;
+    const s = STORE.get(group.currentSessionId);
     if (!s) return;
     if (s.state !== "active") return;
-    if (!s.players.every((p) => !p.connections)) return; // someone came back
+    if (!group.players.every((p) => !p.connections)) return; // someone came back
     endSession(s);
   }, PRESENCE_GRACE_MS);
-  GRACE_TIMERS.set(id, t);
+  GRACE_TIMERS.set(groupId, t);
 }
 
 const MAX_CHAT_LEN = 500;
 const MAX_MESSAGES = 100;
 
-// Append a chat message and broadcast. Truncates over-length text to
-// MAX_CHAT_LEN. Returns { error } if rejected; { ok: true } otherwise.
+// Append a chat message to the group and broadcast. Truncates over-length
+// text to MAX_CHAT_LEN. Returns { error } if rejected; { ok: true } otherwise.
 export function addChatMessage(session, playerId, rawText) {
   if (!isMultiplayer(session)) return { error: "Not a multiplayer game" };
-  if (!session.players.some((p) => p.playerId === playerId)) {
+  const group = getGroup(session);
+  if (!group) return { error: "Group missing" };
+  if (!group.players.some((p) => p.playerId === playerId)) {
     return { error: "Not in this game" };
   }
   const trimmed = String(rawText || "").trim();
   if (!trimmed) return { error: "Empty message" };
-  // Leading "!" marks an important message: bolded in the chat list,
-  // and the client auto-opens its chat popover on arrival. Strip the
-  // sigil so it doesn't appear in the rendered text. A bare "!" with
-  // no body is rejected like an empty message.
   const important = trimmed.startsWith("!");
   const text = important ? trimmed.slice(1).trim() : trimmed;
   if (!text) return { error: "Empty message" };
@@ -372,10 +454,9 @@ export function addChatMessage(session, playerId, rawText) {
     ts: Date.now(),
   };
   if (important) msg.important = true;
-  session.messages.push(msg);
-  // Bound the backlog so long sessions don't grow unbounded.
-  if (session.messages.length > MAX_MESSAGES) {
-    session.messages = session.messages.slice(-MAX_MESSAGES);
+  group.messages.push(msg);
+  if (group.messages.length > MAX_MESSAGES) {
+    group.messages = group.messages.slice(-MAX_MESSAGES);
   }
   touch(session);
   broadcast(session);
@@ -386,29 +467,30 @@ export function addChatMessage(session, playerId, rawText) {
 // connection is counted, so multiple tabs from the same player don't
 // flicker presence on close.
 export function presenceConnect(session, playerId) {
-  if (session.mode !== "multi") return;
-  const p = session.players.find((x) => x.playerId === playerId);
+  if (!isMultiplayer(session)) return;
+  const group = getGroup(session);
+  if (!group) return;
+  const p = group.players.find((x) => x.playerId === playerId);
   if (!p) return;
   p.connections = (p.connections || 0) + 1;
   if (p.connections === 1) {
-    // Transition to online — cancel any pending auto-end.
-    cancelGrace(session.id);
+    cancelGrace(group.id);
     touch(session);
     broadcast(session);
   }
 }
 
 export function presenceDisconnect(session, playerId) {
-  if (session.mode !== "multi") return;
-  const p = session.players.find((x) => x.playerId === playerId);
+  if (!isMultiplayer(session)) return;
+  const group = getGroup(session);
+  if (!group) return;
+  const p = group.players.find((x) => x.playerId === playerId);
   if (!p || !p.connections) return;
   p.connections--;
   if (p.connections === 0) {
-    // Transition to offline. If everyone's gone and the game is active,
-    // arm the grace timer.
     if (
       session.state === "active" &&
-      session.players.every((x) => !x.connections)
+      group.players.every((x) => !x.connections)
     ) {
       scheduleAutoEnd(session);
     }
@@ -417,46 +499,35 @@ export function presenceDisconnect(session, playerId) {
   }
 }
 
-// Create a fresh multiplayer session that carries over the previous
-// game's roster (same playerIds, names, colors) and timer config but
-// with a new random board, no found words, state="active". Idempotent
-// via the old session's nextGameId pointer — a second caller gets the
-// existing successor instead of creating another orphan.
+// Cut a fresh session in the same group: same roster + chat + timer
+// config, new random board. Idempotent in two senses:
+//   1. If the caller is holding a stale session reference (the group
+//      moved on), return the current session.
+//   2. If the current session is already a fresh successor (active,
+//      no words found yet), return it instead of cutting yet another.
+//      Two rapid "new board" clicks shouldn't cascade.
 export async function newBoardFromSession(oldSession) {
   if (!isMultiplayer(oldSession)) {
     return { error: "Not a multiplayer game" };
   }
-  if (oldSession.nextGameId) {
-    const existing = STORE.get(oldSession.nextGameId);
-    if (existing) return existing;
-    // Stale pointer (TTL'd or evicted) — fall through and create anew.
+  const group = getGroup(oldSession);
+  if (!group) return { error: "Group missing" };
+  if (group.currentSessionId !== oldSession.id) {
+    const current = STORE.get(group.currentSessionId);
+    if (current) return current;
+  }
+  if (oldSession.state === "active" && oldSession.found.length === 0) {
+    return oldSession;
   }
   const data = await loadData();
   const board = makeGame(data);
   const now = Date.now();
   const session = {
-    id: pickGameId(data),
+    id: newId(),
+    groupId: group.id,
     mode: oldSession.mode,
     state: "active",
-    hostId: oldSession.hostId,
-    players: oldSession.players.map((p) => ({
-      playerId: p.playerId,
-      name: p.name,
-      color: p.color,
-      connections: 0,
-      joinedAt: now,
-      // Reset per-player state for the new board (compete uses these;
-      // co-op ignores them).
-      found: [],
-      foundSet: new Set(),
-      bonusFound: [],
-      score: 0,
-    })),
     foundBy: {},
-    // Carry chat backlog forward — same group, same conversation. Player
-    // ids in the roster are preserved (see players map above), so name +
-    // color attribution still resolves on the client.
-    messages: oldSession.messages.slice(),
     letters: board.letters,
     center: board.center,
     words: board.words,
@@ -471,41 +542,33 @@ export async function newBoardFromSession(oldSession) {
     ended: false,
     timerMode: oldSession.timerMode,
     countdownSeconds: oldSession.countdownSeconds,
-    // New-board always starts running. startedAt is null for "none"
-    // (there's no clock to anchor), but paused stays false — there's
-    // no resume affordance for a "none" game, so a paused successor
-    // would be unrecoverable.
     paused: false,
     startedAt: oldSession.timerMode === "none" ? null : now,
     accumulatedMs: 0,
     targetRank: oldSession.targetRank ?? null,
+    playerState: {},
     createdAt: now,
     lastActiveAt: now,
   };
   STORE.set(session.id, session);
-  oldSession.nextGameId = session.id;
-  // Surface the successor on the old session so other tabs can navigate.
-  broadcast(oldSession);
+  group.currentSessionId = session.id;
+  group.lastActiveAt = now;
+  // Broadcast on the same URL id (group.id) — subscribers don't need to
+  // navigate, the view just refreshes with the new board.
+  broadcast(session);
   return session;
 }
 
-// Transition a multiplayer session from lobby to active. No-op for
-// solo or non-lobby sessions (caller is responsible for permission
-// checks).
 export function startSession(session) {
   if (!isMultiplayer(session)) return session;
   if (session.state !== "lobby") return session;
   session.state = "active";
-  // Always unpause on start. For "none" the clock simply doesn't tick;
-  // for "up"/"down" we anchor startedAt now.
   session.paused = false;
   session.startedAt = session.timerMode !== "none" ? Date.now() : null;
   touch(session);
   broadcast(session);
   return session;
 }
-
-// --- Timer/lifecycle (used by both solo and multi) ---
 
 export function pauseSession(session) {
   if (session.ended || session.paused) return session;
@@ -520,7 +583,6 @@ export function resumeSession(session) {
   if (session.ended) return session;
   if (!session.paused) return session;
   if (session.timerMode === "none") return session;
-  // Multiplayer: only resume when active (lobby is "paused" by definition).
   if (isMultiplayer(session) && session.state !== "active") return session;
   session.paused = false;
   session.startedAt = Date.now();
@@ -535,17 +597,21 @@ export function endSession(session) {
   session.paused = true;
   session.ended = true;
   session.state = "ended";
-  // Compete: pick a winner. First-to-rank ends are triggered by the
-  // first player to reach the threshold — they uniquely have the
-  // highest score at that moment, so "highest score" resolves to them.
-  // Countdown / manual ends just rank by final score (first-found wins
-  // ties since `>` is strict).
   if (session.mode === "compete") {
-    let best = null;
-    for (const p of session.players) {
-      if (!best || p.score > best.score) best = p;
+    const group = getGroup(session);
+    if (group) {
+      let bestId = null;
+      let bestScore = -Infinity;
+      for (const p of group.players) {
+        const ps = session.playerState[p.playerId];
+        const score = ps ? ps.score : 0;
+        if (score > bestScore) {
+          bestScore = score;
+          bestId = p.playerId;
+        }
+      }
+      if (bestId) session.winnerId = bestId;
     }
-    if (best) session.winnerId = best.playerId;
   }
   touch(session);
   broadcast(session);
@@ -553,18 +619,20 @@ export function endSession(session) {
 }
 
 // Client-safe projection: never includes wordlistSet/scoringSet; revealList
-// only after end. Multi sessions add players/hostId/foundBy.
-//
-// `viewerId` (the requesting player) is plumbed through so compete mode
-// can return per-player word lists. For solo and co-op, the value is
-// ignored — every viewer sees the same shared state.
+// only after end. Multi sessions add roster/host/foundBy/messages from
+// the surrounding group.
 export function clientView(session, viewerId = null) {
-  // viewerId is unused in solo/co-op — referenced here so eslint doesn't
-  // complain about an unused parameter and so the call sites communicate
-  // intent. Compete mode (added in a later phase) will use it.
   void viewerId;
   const view = {
-    gameId: session.id,
+    // Stable URL id: groupId for multi, session id for solo. The client
+    // uses this for routing + localStorage; renaming would churn far
+    // more code than it would clarify.
+    gameId: urlIdOf(session),
+    // Per-session id that changes on new-board (where gameId is stable
+    // because the group's URL doesn't move). The client uses this as a
+    // React `key` so the Game component remounts and resets local state
+    // (typed input, feedback) when the board flips.
+    sessionId: session.id,
     mode: session.mode,
     state: session.state,
     letters: session.letters,
@@ -581,8 +649,10 @@ export function clientView(session, viewerId = null) {
     elapsed: Math.floor(elapsedMs(session) / 1000),
   };
   if (isMultiplayer(session)) {
-    view.hostId = session.hostId;
-    view.players = session.players.map((p) => {
+    const group = getGroup(session);
+    if (!group) return view; // shouldn't happen, but stay defensive
+    view.hostId = group.hostId;
+    view.players = group.players.map((p) => {
       const base = {
         playerId: p.playerId,
         name: p.name,
@@ -590,28 +660,23 @@ export function clientView(session, viewerId = null) {
         online: (p.connections || 0) > 0,
       };
       if (session.mode === "compete") {
-        // Leaderboard data — every player sees every player's score
-        // and word count, but never their actual word lists.
-        base.score = p.score;
-        base.foundCount = p.found.length;
+        const ps = session.playerState[p.playerId];
+        base.score = ps ? ps.score : 0;
+        base.foundCount = ps ? ps.found.length : 0;
       }
       return base;
     });
     view.foundBy = { ...session.foundBy };
-    view.messages = session.messages.slice();
-    if (session.nextGameId) view.nextGameId = session.nextGameId;
+    view.messages = group.messages.slice();
     if (session.targetRank != null) view.targetRank = session.targetRank;
   }
 
-  // Compete: replace the (unused) session-level word state with the
-  // viewer's own slice, so each player only sees what they themselves
-  // have found. An unknown viewerId (observer) gets an empty list.
   if (session.mode === "compete") {
-    const viewer = session.players.find((p) => p.playerId === viewerId);
-    if (viewer) {
-      view.found = viewer.found.slice();
-      view.bonusFound = viewer.bonusFound.slice();
-      view.score = viewer.score;
+    const ps = session.playerState[viewerId];
+    if (ps) {
+      view.found = ps.found.slice();
+      view.bonusFound = ps.bonusFound.slice();
+      view.score = ps.score;
     } else {
       view.found = [];
       view.bonusFound = [];
@@ -620,17 +685,19 @@ export function clientView(session, viewerId = null) {
     if (session.winnerId) view.winnerId = session.winnerId;
 
     // Post-end: precompute "missedByMe" — words the viewer didn't find
-    // that someone else did. Drives the post-game wordlist where the
-    // viewer sees what they missed (others' words) plus unfound greys
-    // (words nobody got). Excluded entirely: words the viewer found
-    // themselves. Iteration order is stable; first finder wins ties.
-    if (session.ended && viewer) {
+    // that someone else did.
+    if (session.ended && ps) {
+      const group = getGroup(session);
       const missed = {};
-      for (const p of session.players) {
-        if (p.playerId === viewer.playerId) continue;
-        for (const w of p.found) {
-          if (viewer.foundSet.has(w)) continue;
-          if (!(w in missed)) missed[w] = p.playerId;
+      if (group) {
+        for (const p of group.players) {
+          if (p.playerId === viewerId) continue;
+          const other = session.playerState[p.playerId];
+          if (!other) continue;
+          for (const w of other.found) {
+            if (ps.foundSet.has(w)) continue;
+            if (!(w in missed)) missed[w] = p.playerId;
+          }
         }
       }
       view.missedByMe = missed;
@@ -640,10 +707,8 @@ export function clientView(session, viewerId = null) {
   return view;
 }
 
-// Mirrors the original client tryWord ordering: bad letters → too short →
-// missing center → already found → membership check. `playerId` is
-// required in compete (per-player state) and recorded for co-op
-// attribution; solo passes null.
+// Mirrors the original tryWord ordering: bad letters → too short →
+// missing center → already found → membership check.
 export function submitWord(session, rawInput, playerId = null) {
   const word = String(rawInput || "").toLowerCase().trim();
   const allowed = new Set(session.letters + session.center);
@@ -655,14 +720,9 @@ export function submitWord(session, rawInput, playerId = null) {
     return { result: SUBMIT.MISSING_CENTER };
   }
 
-  // Compete: state lives on the player record, so the "already found"
-  // check is per-player (player A finding "lemon" does not block B
-  // from finding it). Solo + co-op share session-level state.
   const isCompete = session.mode === "compete";
-  const player = isCompete
-    ? session.players.find((p) => p.playerId === playerId)
-    : null;
-  const foundSet = isCompete ? player.foundSet : session.foundSet;
+  const ps = isCompete ? getPlayerState(session, playerId) : null;
+  const foundSet = isCompete ? ps.foundSet : session.foundSet;
 
   if (foundSet.has(word)) {
     return { result: SUBMIT.ALREADY_FOUND };
@@ -675,18 +735,13 @@ export function submitWord(session, rawInput, playerId = null) {
   const isBonus = !session.scoringSet.has(word);
 
   if (isCompete) {
-    player.found.push(word);
-    player.foundSet.add(word);
-    if (isBonus) player.bonusFound.push(word);
-    player.score += points;
-    // First-to-rank: end the game (for everyone, mid-word allowed) as
-    // soon as any player reaches the target rank. This player is the
-    // winner — endSession's "highest score" rule resolves to them
-    // since nobody else could have reached the threshold first
-    // without ending the game already.
+    ps.found.push(word);
+    ps.foundSet.add(word);
+    if (isBonus) ps.bonusFound.push(word);
+    ps.score += points;
     if (
       session.targetRank != null &&
-      currentRankIndex(player.score, session.total) >= session.targetRank
+      currentRankIndex(ps.score, session.total) >= session.targetRank
     ) {
       endSession(session);
     }
@@ -707,22 +762,16 @@ export function submitWord(session, rawInput, playerId = null) {
     points,
     isPangram,
     bonus: isBonus,
-    totalScore: isCompete ? player.score : session.score,
-    found: isCompete ? player.found.slice() : session.found.slice(),
-    bonusFound: isCompete
-      ? player.bonusFound.slice()
-      : session.bonusFound.slice(),
+    totalScore: isCompete ? ps.score : session.score,
+    found: isCompete ? ps.found.slice() : session.found.slice(),
+    bonusFound: isCompete ? ps.bonusFound.slice() : session.bonusFound.slice(),
   };
 }
 
-// Subscribe to state updates for a session. `send` receives a clientView
-// rendered for `viewerId` whenever the session state changes (submit
-// accepted, pause/resume/end, auto-end). Per-viewer rendering matters
-// for compete mode where each player sees their own word list.
-// Returns an unsubscribe function.
-//
-// The internal storage holds {send, viewerId} entries; broadcast walks
-// them, computing a fresh view per recipient.
+// Subscribe to state updates for a URL id (group for multi, session for
+// solo). Returns an unsubscribe function. Multiple events fan out to
+// the same listeners: chat (group-level), submits (session-level),
+// new-board (cuts a successor session in the same group).
 export function subscribeToSession(id, send, viewerId = null) {
   let subs = SUBS.get(id);
   if (!subs) {
@@ -740,14 +789,13 @@ export function subscribeToSession(id, send, viewerId = null) {
 }
 
 function broadcast(session) {
-  const subs = SUBS.get(session.id);
+  const subs = SUBS.get(urlIdOf(session));
   if (!subs || subs.size === 0) return;
   for (const { send, viewerId } of subs) {
     try {
       send(clientView(session, viewerId));
     } catch {
-      // Subscriber threw (e.g., closed stream); ignore. The route handler
-      // is responsible for cleaning up its own subscription on close.
+      // Subscriber threw (e.g., closed stream); ignore.
     }
   }
 }
@@ -757,8 +805,9 @@ export function _resetStore() {
   for (const t of GRACE_TIMERS.values()) clearTimeout(t);
   GRACE_TIMERS.clear();
   STORE.clear();
+  GROUPS.clear();
   SUBS.clear();
   lastSweepAt = 0;
   dataPromise = null;
-  gameIdPool = null;
+  idPool = null;
 }

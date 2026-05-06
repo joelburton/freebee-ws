@@ -3,6 +3,7 @@ import { registerApiRoutes } from "../../server/routes.js";
 import {
   _resetStore,
   getSession,
+  getGroup,
   subscribeToSession,
   pauseSession,
   resumeSession,
@@ -919,10 +920,11 @@ describe("Multiplayer presence", () => {
   it("non-member presence calls are no-ops on a multi session", async () => {
     const { gameId, hostId } = await startedMulti();
     const session = getSession(gameId);
-    const before = session.players.find((p) => p.playerId === hostId).connections;
+    const group = getGroup(session);
+    const before = group.players.find((p) => p.playerId === hostId).connections;
     presenceConnect(session, "stranger");
     expect(
-      session.players.find((p) => p.playerId === hostId).connections,
+      group.players.find((p) => p.playerId === hostId).connections,
     ).toBe(before);
   });
 });
@@ -936,13 +938,14 @@ describe("connection presence", () => {
     );
     const { gameId, playerId } = await create.json();
     const session = getSession(gameId);
-    expect(session.players[0].connections).toBe(0);
+    const group = getGroup(session);
+    expect(group.players[0].connections).toBe(0);
 
     presenceConnect(session, playerId);
-    expect(session.players[0].connections).toBe(1);
+    expect(group.players[0].connections).toBe(1);
 
     presenceDisconnect(session, playerId);
-    expect(session.players[0].connections).toBe(0);
+    expect(group.players[0].connections).toBe(0);
   });
 
   it("anonymous (no playerId) connection does not affect presence", async () => {
@@ -951,10 +954,11 @@ describe("connection presence", () => {
     );
     const { gameId } = await create.json();
     const session = getSession(gameId);
+    const group = getGroup(session);
     presenceConnect(session, null);
-    expect(session.players[0].connections).toBe(0);
+    expect(group.players[0].connections).toBe(0);
     presenceConnect(session, "not-a-member");
-    expect(session.players[0].connections).toBe(0);
+    expect(group.players[0].connections).toBe(0);
   });
 });
 
@@ -1000,12 +1004,13 @@ describe("Multiplayer new-board", () => {
     );
   }
 
-  it("creates a successor with same roster, same colors, host preserved, timer running", async () => {
+  it("cuts a fresh session in the same group: same URL, same roster, same colors, host preserved, timer running", async () => {
     const old = await buildEndedMulti();
     const res = await newBoard(old.gameId, old.hostId);
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.gameId).not.toBe(old.gameId);
+    // URL id is the group's; "new board" doesn't change it.
+    expect(data.gameId).toBe(old.gameId);
     expect(data.mode).toBe("multi");
     expect(data.state).toBe("active");
     expect(data.hostId).toBe(old.hostId);
@@ -1079,15 +1084,22 @@ describe("Multiplayer new-board", () => {
     expect(b.gameId).toBe(a.gameId);
   });
 
-  it("exposes nextGameId on the old session's view after the first call", async () => {
+  it("after new-board, fetching the URL returns the new (fresh) session", async () => {
+    // Under the group model the URL id is stable across new-board, so a
+    // GET on the same URL after new-board returns the new active session
+    // rather than exposing a redirect-style nextGameId pointer.
     const old = await buildEndedMulti();
-    const a = await (await newBoard(old.gameId, old.hostId)).json();
+    await newBoard(old.gameId, old.hostId);
     const view = await (
       await app.fetch(
         new Request(`http://localhost/api/games/${old.gameId}`),
       )
     ).json();
-    expect(view.nextGameId).toBe(a.gameId);
+    expect(view.gameId).toBe(old.gameId);
+    expect(view.state).toBe("active");
+    expect(view.ended).toBe(false);
+    expect(view.found).toEqual([]);
+    expect(view.nextGameId).toBeUndefined();
   });
 
   it("403 when caller isn't a member", async () => {

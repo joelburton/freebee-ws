@@ -4,7 +4,6 @@ import Game from "../components/Game";
 import {
   clearSavedState,
   loadSavedState,
-  saveState,
   setBanner,
 } from "../components/storage";
 import { fetchGame, postJson } from "../api";
@@ -28,11 +27,6 @@ export default function PlayPage() {
       }
       if (data.mode !== "multi" && data.mode !== "compete") {
         navigate(`/p/${gameId}`, { replace: true });
-        return;
-      }
-      // Server has cut a successor — bring this player along.
-      if (data.nextGameId) {
-        navigate(`/g/${data.nextGameId}/play`, { replace: true });
         return;
       }
       // Lobby is the lobby's job.
@@ -60,20 +54,12 @@ export default function PlayPage() {
     };
   }, [gameId, navigate]);
 
-  function handleNextGame(nextId) {
-    const saved = loadSavedState();
-    if (saved?.gameId === gameId && saved.playerId) {
-      saveState({ gameId: nextId, playerId: saved.playerId });
-    }
-    navigate(`/g/${nextId}/play`);
-  }
-
   async function handleNewBoard() {
+    // The URL stays the same across new-board (same group), so there's
+    // no navigate to do — the WS push (and the response body, applied by
+    // <Game>) carries the fresh board into the existing route.
     try {
-      const data = await postJson(`/api/games/${gameId}/new-board`, {
-        playerId,
-      });
-      handleNextGame(data.gameId);
+      await postJson(`/api/games/${gameId}/new-board`, { playerId });
     } catch (e) {
       setLoadError(e.message);
     }
@@ -89,12 +75,14 @@ export default function PlayPage() {
 
   return (
     <Game
-      key={game.gameId}
+      // sessionId changes on new-board (gameId stays — same group URL),
+      // so this remounts <Game> and clears local state like typed input
+      // and feedback that wouldn't otherwise reset between boards.
+      key={game.sessionId || game.gameId}
       game={game}
       playerId={playerId}
       onNewGame={handleNewBoard}
       onResetSetup={handleResetSetup}
-      onNextGame={handleNextGame}
     />
   );
 }

@@ -37,11 +37,6 @@ export default function LobbyPage() {
         navigate("/", { replace: true });
         return;
       }
-      // Already-superseded by /new-board → jump to successor and replace.
-      if (data.nextGameId) {
-        navigate(`/g/${data.nextGameId}`, { replace: true });
-        return;
-      }
       setGame(data);
       const saved = loadSavedState();
       const valid =
@@ -69,10 +64,6 @@ export default function LobbyPage() {
       try {
         const msg = JSON.parse(evt.data);
         if (!msg?.view) return;
-        if (msg.view.nextGameId) {
-          navigate(`/g/${msg.view.nextGameId}`, { replace: true });
-          return;
-        }
         if (msg.view.state !== "lobby" && playerId) {
           navigate(`/g/${gameId}/play`, { replace: true });
           return;
