@@ -90,6 +90,16 @@ describe("Chat", () => {
     expect(btn.style.cssText).toMatch(/rgb\(230, 74, 25\)/);
   });
 
+  it("a backlog containing only the viewer's own messages does NOT light up the button", () => {
+    // Reproduces the refresh-after-sending-a-message bug: previously
+    // the entire backlog (including the viewer's own messages) counted
+    // as unread, so the chat bubble flashed in the viewer's own color.
+    const messages = [{ playerId: "p-host", text: "hi", ts: 1 }];
+    renderChat({ messages });
+    const btn = screen.getByRole("button", { name: "Chat" });
+    expect(btn.classList.contains("has-unread")).toBe(false);
+  });
+
   it("opening the popover clears the unread state", async () => {
     const user = userEvent.setup();
     const messages = [{ playerId: "p-buddy", text: "yo", ts: 1 }];

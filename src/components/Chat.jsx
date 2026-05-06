@@ -104,10 +104,17 @@ const Chat = forwardRef(function Chat(
     }
   }, [messages.length, open]);
 
-  const unread = Math.max(0, messages.length - lastReadCount);
-  const lastMsg = messages.length ? messages[messages.length - 1] : null;
-  const lastSender = lastMsg
-    ? players.find((p) => p.playerId === lastMsg.playerId)
+  // Unread count excludes the viewer's own messages — they sent them,
+  // they don't need to be alerted about them. Without this filter, a
+  // refresh after sending a message lights up the chat button with the
+  // viewer's own color until they click the bubble.
+  const unreadFromOthers = messages
+    .slice(lastReadCount)
+    .filter((m) => m.playerId !== playerId);
+  const unread = unreadFromOthers.length;
+  const lastUnread = unreadFromOthers.at(-1);
+  const lastSender = lastUnread
+    ? players.find((p) => p.playerId === lastUnread.playerId)
     : null;
   const unreadColor = unread > 0 && lastSender ? lastSender.color : null;
 
