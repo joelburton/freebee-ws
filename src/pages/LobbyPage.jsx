@@ -71,12 +71,7 @@ export default function LobbyPage() {
     ws.addEventListener("message", (evt) => {
       try {
         const msg = JSON.parse(evt.data);
-        if (!msg?.view) return;
-        if (msg.view.state === "active" && playerId) {
-          navigate(`/g/${gameId}/play`, { replace: true });
-          return;
-        }
-        setGame(msg.view);
+        if (msg?.view) setGame(msg.view);
       } catch {
         // ignore
       }
@@ -84,6 +79,18 @@ export default function LobbyPage() {
     return () => ws.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, game?.state, playerId]);
+
+  // Navigate to /play when the session goes active and we have an
+  // identity. Kept separate from the WS handler so it can't miss the
+  // transition: if a state push lands with the WS-handler's closure
+  // still holding a stale (null) playerId, that handler skips its
+  // inline navigate and just calls setGame; this effect picks up the
+  // (state="active", playerId=set) combination on the next render.
+  useEffect(() => {
+    if (game?.state === "active" && playerId) {
+      navigate(`/g/${gameId}/play`, { replace: true });
+    }
+  }, [game?.state, playerId, gameId, navigate]);
 
   async function handleJoin(evt) {
     evt.preventDefault();
