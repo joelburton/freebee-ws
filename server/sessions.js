@@ -301,6 +301,16 @@ export function getGroup(session) {
   return session.groupId ? GROUPS.get(session.groupId) ?? null : null;
 }
 
+// Resolve a URL id to a group, regardless of whether it has a session yet.
+// Used by routes that need to operate on a no-session group (assembling /
+// configuring) — getSession returns null in those states.
+export function getGroupForId(id) {
+  maybeSweep();
+  const g = GROUPS.get(id);
+  if (g) g.lastActiveAt = Date.now();
+  return g ?? null;
+}
+
 // --- Multiplayer membership helpers ---
 
 export function isMultiplayer(session) {
@@ -387,22 +397,146 @@ function createSession(rawOpts, makeBoard, data) {
   return session;
 }
 
+// Create a group with no session. The host can invite friends, then
+// someone enters configure mode to pick options for the first game.
+export async function createEmptyGroup(playerName) {
+  const cleanName = String(playerName || "").trim();
+  if (!cleanName) return { error: "Name required" };
+  const data = await loadData();
+  const host = makePlayer(cleanName, PLAYER_COLORS[0]);
+  const id = pickUrlId(data);
+  const now = Date.now();
+  const group = {
+    id,
+    hostId: host.playerId,
+    players: [host],
+    messages: [],
+    currentSessionId: null,
+    configuring: null,
+    createdAt: now,
+    lastActiveAt: now,
+  };
+  GROUPS.set(id, group);
+  return group;
+}
+
+// --- Configuration state machine ---
+//
+// Between games (no session, or current session ended), one player at a
+// time can take ownership of the "next game" setup form. Others see a
+// "Joel is setting up the next game…" wait screen and can chat. The
+// owner commits → a fresh session is created in the group.
+
+function configureGuard(group, playerId) {
+  if (!group.players.some((p) => p.playerId === playerId)) {
+    return { error: "Not in this group" };
+  }
+  return null;
+}
+
+// True when the group is in a state where a new game can be configured:
+// no session yet, or the current session has ended. An active or lobby
+// session blocks configure (the configurator would stomp it).
+function canConfigure(group) {
+  if (!group.currentSessionId) return true;
+  const s = STORE.get(group.currentSessionId);
+  if (!s) return true;
+  return s.ended;
+}
+
+export function startConfiguring(group, playerId) {
+  const err = configureGuard(group, playerId);
+  if (err) return err;
+  if (!canConfigure(group)) return { error: "Game in progress" };
+  if (group.configuring && group.configuring.ownerId !== playerId) {
+    return { error: "Someone else is configuring" };
+  }
+  group.configuring = { ownerId: playerId };
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
+  return { ok: true };
+}
+
+export function cancelConfiguring(group, playerId) {
+  const err = configureGuard(group, playerId);
+  if (err) return err;
+  if (!group.configuring) return { ok: true }; // idempotent
+  if (group.configuring.ownerId !== playerId) {
+    return { error: "Not the configurator" };
+  }
+  group.configuring = null;
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
+  return { ok: true };
+}
+
+// Commit configuration: create a session in the group with the given
+// options. Owner-only. Releases configuring state.
+export async function commitConfiguration(group, playerId, opts) {
+  const err = configureGuard(group, playerId);
+  if (err) return err;
+  if (!group.configuring || group.configuring.ownerId !== playerId) {
+    return { error: "Not the configurator" };
+  }
+  if (!canConfigure(group)) return { error: "Game in progress" };
+  const data = await loadData();
+  const { letters, center, ...rest } = opts || {};
+  let board;
+  if (letters !== undefined || center !== undefined) {
+    const cerr = validateCustomLetters(letters, center);
+    if (cerr) return { error: cerr };
+    board = makeCustomGame(data, letters, center);
+    if (board.wordlist.length === 0) {
+      return { error: "No valid words for these letters" };
+    }
+  } else {
+    board = makeGame(data);
+  }
+  // Sessions created via configure go straight to active (no session
+  // lobby — the group already served as the assembly room).
+  const sessionOpts = {
+    timerMode: rest.timerMode === "down" || rest.timerMode === "none"
+      ? rest.timerMode
+      : "up",
+    countdownSeconds: Number.isFinite(rest.countdownSeconds)
+      ? Math.max(0, Math.floor(rest.countdownSeconds))
+      : 0,
+    mode: rest.mode === "compete" ? "compete" : "multi",
+    ...(Number.isInteger(rest.targetRank) ? { targetRank: rest.targetRank } : {}),
+  };
+  const session = buildSession(board, sessionOpts, group.id);
+  // Skip the session-lobby state — go straight to active.
+  session.state = "active";
+  session.paused = false;
+  session.startedAt = sessionOpts.timerMode !== "none" ? Date.now() : null;
+  STORE.set(session.id, session);
+  group.currentSessionId = session.id;
+  group.configuring = null;
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
+  return session;
+}
+
 // --- Player join / lifecycle ---
 
-// Add a player to a multiplayer group. Lobby-state only. The session
-// the group currently points at must be in lobby — once active, the
-// roster is locked.
-export function addPlayer(session, name) {
-  if (!isMultiplayer(session)) return { error: "Not a multiplayer game" };
-  if (session.state !== "lobby") return { error: "Game already started" };
-  const group = getGroup(session);
-  if (!group) return { error: "Group missing" };
+// Add a player to a multiplayer group. Allowed when the group has no
+// active game in progress: either no session yet, or the current
+// session is in lobby/ended state. Once a game is "active", the
+// roster is locked until it ends.
+export function addPlayer(group, name) {
+  if (!group) return { error: "Group not found" };
+  if (group.currentSessionId) {
+    const s = STORE.get(group.currentSessionId);
+    if (s && s.state === "active") {
+      return { error: "Game already started" };
+    }
+  }
   const cleanName = String(name || "").trim();
   if (!cleanName) return { error: "Name required" };
   const player = makePlayer(cleanName, nextColor(group.players));
   group.players.push(player);
-  touch(session);
-  broadcast(session);
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
   return { player };
 }
 
@@ -435,13 +569,13 @@ const MAX_CHAT_LEN = 500;
 const MAX_MESSAGES = 100;
 
 // Append a chat message to the group and broadcast. Truncates over-length
-// text to MAX_CHAT_LEN. Returns { error } if rejected; { ok: true } otherwise.
-export function addChatMessage(session, playerId, rawText) {
-  if (!isMultiplayer(session)) return { error: "Not a multiplayer game" };
-  const group = getGroup(session);
-  if (!group) return { error: "Group missing" };
+// text to MAX_CHAT_LEN. Operates on the group directly so empty groups
+// (assembling/configuring) can chat too. Returns { error } if rejected;
+// { ok: true } otherwise.
+export function addChatMessage(group, playerId, rawText) {
+  if (!group) return { error: "Group not found" };
   if (!group.players.some((p) => p.playerId === playerId)) {
-    return { error: "Not in this game" };
+    return { error: "Not in this group" };
   }
   const trimmed = String(rawText || "").trim();
   if (!trimmed) return { error: "Empty message" };
@@ -458,44 +592,45 @@ export function addChatMessage(session, playerId, rawText) {
   if (group.messages.length > MAX_MESSAGES) {
     group.messages = group.messages.slice(-MAX_MESSAGES);
   }
-  touch(session);
-  broadcast(session);
+  group.lastActiveAt = Date.now();
+  broadcastGroup(group);
   return { ok: true };
 }
 
 // Mark that a player opened a WS connection. Idempotent in spirit: each
 // connection is counted, so multiple tabs from the same player don't
-// flicker presence on close.
-export function presenceConnect(session, playerId) {
-  if (!isMultiplayer(session)) return;
-  const group = getGroup(session);
+// flicker presence on close. Operates on the group directly so empty
+// groups (assembling/configuring with no session) can track presence.
+export function presenceConnect(group, playerId) {
   if (!group) return;
   const p = group.players.find((x) => x.playerId === playerId);
   if (!p) return;
   p.connections = (p.connections || 0) + 1;
   if (p.connections === 1) {
     cancelGrace(group.id);
-    touch(session);
-    broadcast(session);
+    group.lastActiveAt = Date.now();
+    broadcastGroup(group);
   }
 }
 
-export function presenceDisconnect(session, playerId) {
-  if (!isMultiplayer(session)) return;
-  const group = getGroup(session);
+export function presenceDisconnect(group, playerId) {
   if (!group) return;
   const p = group.players.find((x) => x.playerId === playerId);
   if (!p || !p.connections) return;
   p.connections--;
   if (p.connections === 0) {
+    const session = group.currentSessionId
+      ? STORE.get(group.currentSessionId)
+      : null;
     if (
+      session &&
       session.state === "active" &&
       group.players.every((x) => !x.connections)
     ) {
       scheduleAutoEnd(session);
     }
-    touch(session);
-    broadcast(session);
+    group.lastActiveAt = Date.now();
+    broadcastGroup(group);
   }
 }
 
@@ -618,6 +753,30 @@ export function endSession(session) {
   return session;
 }
 
+// Group view: rendered when a group has no session yet (assembling) or
+// is between games (configuring). Contains roster + chat + state, but
+// no board fields. The client distinguishes by `state`:
+// "assembling" / "configuring" mean "no game right now".
+export function groupView(group, viewerId = null) {
+  void viewerId;
+  const view = {
+    gameId: group.id,
+    state: group.configuring ? "configuring" : "assembling",
+    hostId: group.hostId,
+    players: group.players.map((p) => ({
+      playerId: p.playerId,
+      name: p.name,
+      color: p.color,
+      online: (p.connections || 0) > 0,
+    })),
+    messages: group.messages.slice(),
+  };
+  if (group.configuring) {
+    view.configuring = { ownerId: group.configuring.ownerId };
+  }
+  return view;
+}
+
 // Client-safe projection: never includes wordlistSet/scoringSet; revealList
 // only after end. Multi sessions add roster/host/foundBy/messages from
 // the surrounding group.
@@ -652,6 +811,13 @@ export function clientView(session, viewerId = null) {
     const group = getGroup(session);
     if (!group) return view; // shouldn't happen, but stay defensive
     view.hostId = group.hostId;
+    if (group.configuring) {
+      // After "New setup" on the end screen but before commit, the
+      // group is back in configuring while the ended session is still
+      // the current one. Surface so the client can show the wait /
+      // form screens over the end-of-game view.
+      view.configuring = { ownerId: group.configuring.ownerId };
+    }
     view.players = group.players.map((p) => {
       const base = {
         playerId: p.playerId,
@@ -796,6 +962,27 @@ function broadcast(session) {
       send(clientView(session, viewerId));
     } catch {
       // Subscriber threw (e.g., closed stream); ignore.
+    }
+  }
+}
+
+// Group-driven broadcast: dispatches the right view based on whether the
+// group has a session. Use for group-level changes (chat, presence,
+// configure) that need to reach subscribers regardless of session state.
+function broadcastGroup(group) {
+  const subs = SUBS.get(group.id);
+  if (!subs || subs.size === 0) return;
+  const session = group.currentSessionId
+    ? STORE.get(group.currentSessionId)
+    : null;
+  for (const { send, viewerId } of subs) {
+    try {
+      const view = session
+        ? clientView(session, viewerId)
+        : groupView(group, viewerId);
+      send(view);
+    } catch {
+      // ignore
     }
   }
 }

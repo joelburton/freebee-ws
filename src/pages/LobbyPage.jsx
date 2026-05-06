@@ -8,7 +8,14 @@ import {
   saveState,
   setBanner,
 } from "../components/storage";
-import { fetchGame, openGameStream, postJson } from "../api";
+import { fetchGame, openGameStream, parseTime, postJson } from "../api";
+import {
+  CustomLettersForm,
+  EndCondition,
+  TimerControls,
+} from "../components/setupFields";
+
+const DEFAULT_TARGET_RANK = 6;
 
 export default function LobbyPage() {
   const { gameId } = useParams();
@@ -20,8 +27,8 @@ export default function LobbyPage() {
   const [actionError, setActionError] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
 
-  // Initial load: fetch state, validate it's a multi lobby, recover saved
-  // playerId if it's still in the roster.
+  // Initial load: fetch state, recover saved playerId if it's still in
+  // the roster.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -32,7 +39,8 @@ export default function LobbyPage() {
         navigate("/", { replace: true });
         return;
       }
-      if (data.mode !== "multi" && data.mode !== "compete") {
+      // Solo URL ended up here by mistake.
+      if (data.mode === "solo") {
         setBanner("That isn't a multiplayer game.");
         navigate("/", { replace: true });
         return;
@@ -43,11 +51,9 @@ export default function LobbyPage() {
         saved &&
         saved.gameId === gameId &&
         saved.playerId &&
-        data.players.some((p) => p.playerId === saved.playerId);
+        data.players?.some((p) => p.playerId === saved.playerId);
       if (valid) setPlayerId(saved.playerId);
-      // Game has already started: members go to /play, strangers stay
-      // here and see the "already started" card.
-      if (data.state !== "lobby" && valid) {
+      if (data.state === "active" && valid) {
         navigate(`/g/${gameId}/play`, { replace: true });
       }
     })();
@@ -56,15 +62,17 @@ export default function LobbyPage() {
     };
   }, [gameId, navigate]);
 
-  // Live lobby updates. When the host hits Start, we navigate to /play.
+  // Live updates: chat, roster, configure ownership, plus the flip to
+  // active when someone commits configuration.
   useEffect(() => {
-    if (!game || game.state !== "lobby") return;
+    if (!game) return;
+    if (game.state === "active") return;
     const ws = openGameStream(gameId, playerId);
     ws.addEventListener("message", (evt) => {
       try {
         const msg = JSON.parse(evt.data);
         if (!msg?.view) return;
-        if (msg.view.state !== "lobby" && playerId) {
+        if (msg.view.state === "active" && playerId) {
           navigate(`/g/${gameId}/play`, { replace: true });
           return;
         }
@@ -74,8 +82,6 @@ export default function LobbyPage() {
       }
     });
     return () => ws.close();
-    // Re-run only on lobby-state transitions and the local playerId
-    // becoming known; not on every roster broadcast.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, game?.state, playerId]);
 
@@ -100,6 +106,32 @@ export default function LobbyPage() {
     }
   }
 
+  async function handleStartSetup() {
+    setBusy(true);
+    setActionError("");
+    try {
+      await postJson(`/api/games/${gameId}/configure`, { playerId });
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCancelSetup() {
+    setBusy(true);
+    setActionError("");
+    try {
+      await postJson(`/api/games/${gameId}/configure/cancel`, { playerId });
+    } catch (e) {
+      setActionError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Legacy single-step start (for sessions that still spin up via the
+  // old /api/games path with a session-level lobby state).
   async function handleStart() {
     setBusy(true);
     setActionError("");
@@ -119,10 +151,9 @@ export default function LobbyPage() {
       setTimeout(() => setCopyMsg(""), 2000);
     };
 
-    // Modern API only works in secure contexts (HTTPS or localhost).
-    // Testing on a phone via the dev server's LAN IP fails the
-    // promise; fall back to the deprecated execCommand path which
-    // works on plain HTTP too.
+    // Modern API only works in secure contexts. On a phone via the dev
+    // server's LAN IP it fails — fall back to execCommand which works
+    // on plain HTTP too.
     const fallback = () => {
       try {
         const ta = document.createElement("textarea");
@@ -169,9 +200,10 @@ export default function LobbyPage() {
     </header>
   );
 
-  // Not joined: show join card, or "already started" if too late.
+  // Not-yet-in-the-roster: show a join card. (Or "already started" if
+  // they arrived too late to join an active session.)
   if (!playerId) {
-    if (game.state !== "lobby") {
+    if (game.state === "active") {
       return (
         <div className="App-start">
           {siteHeader}
@@ -191,11 +223,11 @@ export default function LobbyPage() {
       <div className="App-start">
         {siteHeader}
         <section className="App-card">
-          <h2 className="App-card-title">Join game</h2>
+          <h2 className="App-card-title">Join group</h2>
           <p className="App-multi-roster-summary">
-            {game.players.length === 1
+            {game.players?.length === 1
               ? `${game.players[0].name} is waiting.`
-              : `${game.players.map((p) => p.name).join(", ")} are waiting.`}
+              : `${(game.players || []).map((p) => p.name).join(", ")} are waiting.`}
           </p>
           <form className="App-start-row" onSubmit={handleJoin}>
             <label className="App-start-field App-start-field-wide">
@@ -224,61 +256,111 @@ export default function LobbyPage() {
     );
   }
 
-  // Joined and in lobby. (active/ended states are handled by the redirect
-  // effect — this branch is just the lobby render.)
   const isHost = game.hostId === playerId;
+  const configuring = game.configuring;
+  const isConfigurator = configuring && configuring.ownerId === playerId;
+  const configuringName = configuring
+    ? game.players.find((p) => p.playerId === configuring.ownerId)?.name ||
+      "Someone"
+    : null;
+  const isLegacyLobby = game.state === "lobby"; // session-level lobby
+
   return (
     <div className="App-start">
       {siteHeader}
       <section className="App-card App-card-lobby">
-        <h2 className="App-card-title">Lobby</h2>
-        <ul className="App-lobby-roster">
-          {game.players.map((p) => (
-            <li
-              key={p.playerId}
-              style={{ "--player-color": p.color }}
-              className={`App-lobby-player${
-                p.online === false ? " is-offline" : ""
-              }`}
-            >
-              <span className="App-lobby-dot" aria-hidden="true" />
-              <span className="App-lobby-name">{p.name}</span>
-              {p.playerId === game.hostId && (
-                <span className="App-lobby-tag">host</span>
-              )}
-              {p.playerId === playerId && (
-                <span className="App-lobby-tag">you</span>
-              )}
-            </li>
-          ))}
-        </ul>
-        <button
-          type="button"
-          className="App-start-go"
-          onClick={handleCopyLink}
-        >
-          {copyMsg || "Copy share link"}
-        </button>
-        {isHost ? (
+        <h2 className="App-card-title">
+          {isConfigurator
+            ? "Set up the next game"
+            : configuring
+              ? `${configuringName} is setting up…`
+              : "Lobby"}
+        </h2>
+        {!isConfigurator && (
+          <ul className="App-lobby-roster">
+            {game.players.map((p) => (
+              <li
+                key={p.playerId}
+                style={{ "--player-color": p.color }}
+                className={`App-lobby-player${
+                  p.online === false ? " is-offline" : ""
+                }`}
+              >
+                <span className="App-lobby-dot" aria-hidden="true" />
+                <span className="App-lobby-name">{p.name}</span>
+                {p.playerId === game.hostId && (
+                  <span className="App-lobby-tag">host</span>
+                )}
+                {p.playerId === playerId && (
+                  <span className="App-lobby-tag">you</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {isConfigurator ? (
+          <ConfigureForm
+            gameId={gameId}
+            playerId={playerId}
+            onCancel={handleCancelSetup}
+            busy={busy}
+            onError={setActionError}
+          />
+        ) : configuring ? (
+          <p className="App-multi-waiting">
+            Waiting while {configuringName} picks the options. You can
+            still chat.
+          </p>
+        ) : (
           <>
             <button
               type="button"
               className="App-start-go"
-              onClick={handleStart}
-              disabled={busy || game.players.length < 2}
+              onClick={handleCopyLink}
             >
-              Start game
+              {copyMsg || "Copy share link"}
             </button>
-            <p className="App-multi-waiting">
-              {game.players.length < 2
-                ? "Waiting for friends to join — share the link above."
-                : "Start the game once everyone you invited has arrived."}
-            </p>
+            {isLegacyLobby ? (
+              isHost ? (
+                <>
+                  <button
+                    type="button"
+                    className="App-start-go"
+                    onClick={handleStart}
+                    disabled={busy || game.players.length < 2}
+                  >
+                    Start game
+                  </button>
+                  <p className="App-multi-waiting">
+                    {game.players.length < 2
+                      ? "Waiting for friends to join — share the link above."
+                      : "Start the game once everyone you invited has arrived."}
+                  </p>
+                </>
+              ) : (
+                <p className="App-multi-waiting">
+                  Waiting for {hostName(game)} to start…
+                </p>
+              )
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="App-start-go"
+                  onClick={handleStartSetup}
+                  disabled={busy}
+                >
+                  Start setup
+                </button>
+                <p className="App-multi-waiting">
+                  {game.players.length < 2
+                    ? "Waiting for friends to join — share the link above."
+                    : "Click to pick game options for everyone."}
+                </p>
+              </>
+            )}
           </>
-        ) : (
-          <p className="App-multi-waiting">
-            Waiting for {hostName(game)} to start…
-          </p>
         )}
         {actionError && <p className="App-start-error">{actionError}</p>}
       </section>
@@ -289,4 +371,151 @@ export default function LobbyPage() {
 function hostName(game) {
   const host = game.players.find((p) => p.playerId === game.hostId);
   return host ? host.name : "the host";
+}
+
+// In-group configure form: mode + timer/end + optional custom letters.
+// Owner-only; rendered when the group is in "configuring" state and
+// the viewer owns the form.
+function ConfigureForm({ gameId, playerId, onCancel, busy, onError }) {
+  const [mode, setMode] = useState("multi"); // "multi" (co-op) or "compete"
+  const [timerMode, setTimerMode] = useState("none");
+  const [countdownInput, setCountdownInput] = useState("5:00");
+  const [endModeCompete, setEndModeCompete] = useState("rank");
+  const [countdownInputCompete, setCountdownInputCompete] = useState("5:00");
+  const [targetRankCompete, setTargetRankCompete] = useState(
+    DEFAULT_TARGET_RANK,
+  );
+  const [centerInput, setCenterInput] = useState("");
+  const [outerInput, setOuterInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  function ensureCountdown(modeStr, inputStr) {
+    if (modeStr !== "down") return 0;
+    const s = parseTime(inputStr);
+    if (!s) {
+      onError("Countdown must be M:SS or MM:SS (e.g. 5:00)");
+      return null;
+    }
+    return s;
+  }
+
+  async function commit(extra = {}) {
+    onError("");
+    const body = { playerId, mode, ...extra };
+    if (mode === "compete") {
+      if (endModeCompete === "down") {
+        const cs = ensureCountdown("down", countdownInputCompete);
+        if (cs === null) return;
+        body.timerMode = "down";
+        body.countdownSeconds = cs;
+      } else {
+        body.timerMode = "up";
+        body.targetRank = targetRankCompete;
+      }
+    } else {
+      const cs = ensureCountdown(timerMode, countdownInput);
+      if (cs === null) return;
+      body.timerMode = timerMode;
+      body.countdownSeconds = cs;
+    }
+    setSubmitting(true);
+    try {
+      // Server pushes "active" state via WS; lobby's effect navigates.
+      await postJson(`/api/games/${gameId}/configure/commit`, body);
+    } catch (e) {
+      onError(e.message);
+      setSubmitting(false);
+    }
+  }
+
+  function commitRandom() {
+    return commit();
+  }
+
+  function commitCustom(evt) {
+    evt.preventDefault();
+    return commit({
+      letters: outerInput.toLowerCase(),
+      center: centerInput.toLowerCase(),
+    });
+  }
+
+  return (
+    <>
+      <div className="App-tabs" role="tablist" aria-label="Game mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "multi"}
+          tabIndex={mode === "multi" ? 0 : -1}
+          className={`App-tab${mode === "multi" ? " is-active" : ""}`}
+          onClick={() => setMode("multi")}
+        >
+          Co-op
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "compete"}
+          tabIndex={mode === "compete" ? 0 : -1}
+          className={`App-tab${mode === "compete" ? " is-active" : ""}`}
+          onClick={() => setMode("compete")}
+        >
+          Compete
+        </button>
+      </div>
+
+      {mode === "multi" ? (
+        <TimerControls
+          radioGroup="cfg-timer"
+          mode={timerMode}
+          onModeChange={setTimerMode}
+          countdown={countdownInput}
+          onCountdownChange={setCountdownInput}
+        />
+      ) : (
+        <EndCondition
+          radioGroup="cfg-end"
+          mode={endModeCompete}
+          onModeChange={setEndModeCompete}
+          countdown={countdownInputCompete}
+          onCountdownChange={setCountdownInputCompete}
+          targetRank={targetRankCompete}
+          onTargetRankChange={setTargetRankCompete}
+        />
+      )}
+
+      <div className="App-start-row">
+        <span className="App-start-row-label">Random letters</span>
+        <button
+          type="button"
+          className="App-start-go"
+          onClick={commitRandom}
+          disabled={busy || submitting}
+          aria-label="Start with random letters"
+        >
+          Go
+        </button>
+      </div>
+      <CustomLettersForm
+        center={centerInput}
+        onCenterChange={setCenterInput}
+        outer={outerInput}
+        onOuterChange={setOuterInput}
+        onSubmit={commitCustom}
+        disabled={busy || submitting}
+        ariaLabel="Start with chosen letters"
+      />
+
+      <button
+        type="button"
+        className="App-start-go"
+        onClick={onCancel}
+        disabled={busy || submitting}
+        style={{ alignSelf: "flex-start" }}
+      >
+        Cancel
+      </button>
+    </>
+  );
 }

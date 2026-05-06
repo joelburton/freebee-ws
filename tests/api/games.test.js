@@ -627,6 +627,8 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
   });
 
   it("join refuses on a solo game", async () => {
+    // Solo games have no group, so join can't find one — same effect
+    // as "not multiplayer" but expressed as 404.
     const create = await app.fetch(pjson("http://localhost/api/games", {}));
     const { gameId } = await create.json();
     const res = await app.fetch(
@@ -634,8 +636,7 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
         playerName: "Alice",
       }),
     );
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/multiplayer/i);
+    expect(res.status).toBe(404);
   });
 
   it("join refuses after the game has started", async () => {
@@ -863,12 +864,12 @@ describe("Multiplayer presence", () => {
     const events = [];
     const unsub = subscribeToSession(gameId, (v) => events.push(v));
 
-    presenceConnect(session, hostId);
+    presenceConnect(getGroup(session), hostId);
     expect(events.at(-1).players.find((p) => p.playerId === hostId).online).toBe(true);
-    presenceConnect(session, hostId); // second tab — no transition
-    presenceDisconnect(session, hostId); // first tab away — still online
+    presenceConnect(getGroup(session), hostId); // second tab — no transition
+    presenceDisconnect(getGroup(session), hostId); // first tab away — still online
     expect(events).toHaveLength(1);
-    presenceDisconnect(session, hostId); // last tab away — offline now
+    presenceDisconnect(getGroup(session), hostId); // last tab away — offline now
     expect(events.at(-1).players.find((p) => p.playerId === hostId).online).toBe(false);
     expect(events).toHaveLength(2);
 
@@ -880,14 +881,14 @@ describe("Multiplayer presence", () => {
     try {
       const { gameId, hostId, buddyId } = await startedMulti();
       const session = getSession(gameId);
-      presenceConnect(session, hostId);
-      presenceConnect(session, buddyId);
-      presenceDisconnect(session, hostId);
+      presenceConnect(getGroup(session), hostId);
+      presenceConnect(getGroup(session), buddyId);
+      presenceDisconnect(getGroup(session), hostId);
       // Buddy still online — game should not be ended.
       vi.advanceTimersByTime(PRESENCE_GRACE_MS + 1000);
       expect(session.state).toBe("active");
 
-      presenceDisconnect(session, buddyId);
+      presenceDisconnect(getGroup(session), buddyId);
       // Now everyone's offline. Just under grace: still active.
       vi.advanceTimersByTime(PRESENCE_GRACE_MS - 1000);
       expect(session.state).toBe("active");
@@ -905,11 +906,11 @@ describe("Multiplayer presence", () => {
     try {
       const { gameId, hostId } = await startedMulti();
       const session = getSession(gameId);
-      presenceConnect(session, hostId);
-      presenceDisconnect(session, hostId);
+      presenceConnect(getGroup(session), hostId);
+      presenceDisconnect(getGroup(session), hostId);
       // Halfway through the grace, host reconnects.
       vi.advanceTimersByTime(PRESENCE_GRACE_MS / 2);
-      presenceConnect(session, hostId);
+      presenceConnect(getGroup(session), hostId);
       vi.advanceTimersByTime(PRESENCE_GRACE_MS);
       expect(session.state).toBe("active");
     } finally {
@@ -922,7 +923,7 @@ describe("Multiplayer presence", () => {
     const session = getSession(gameId);
     const group = getGroup(session);
     const before = group.players.find((p) => p.playerId === hostId).connections;
-    presenceConnect(session, "stranger");
+    presenceConnect(getGroup(session), "stranger");
     expect(
       group.players.find((p) => p.playerId === hostId).connections,
     ).toBe(before);
@@ -941,10 +942,10 @@ describe("connection presence", () => {
     const group = getGroup(session);
     expect(group.players[0].connections).toBe(0);
 
-    presenceConnect(session, playerId);
+    presenceConnect(group, playerId);
     expect(group.players[0].connections).toBe(1);
 
-    presenceDisconnect(session, playerId);
+    presenceDisconnect(group, playerId);
     expect(group.players[0].connections).toBe(0);
   });
 
@@ -955,9 +956,9 @@ describe("connection presence", () => {
     const { gameId } = await create.json();
     const session = getSession(gameId);
     const group = getGroup(session);
-    presenceConnect(session, null);
+    presenceConnect(group, null);
     expect(group.players[0].connections).toBe(0);
-    presenceConnect(session, "not-a-member");
+    presenceConnect(group, "not-a-member");
     expect(group.players[0].connections).toBe(0);
   });
 });
@@ -1162,11 +1163,13 @@ describe("Multiplayer chat", () => {
     expect(res.status).toBe(403);
   });
 
-  it("400s on a solo game", async () => {
+  it("404s on a solo game", async () => {
+    // Solo games have no group, so chat can't find one — same effect
+    // as "not multiplayer" but expressed as 404.
     const create = await app.fetch(jsonReq("http://localhost/api/games", {}));
     const { gameId } = await create.json();
     const res = await chat(gameId, "x", "hi");
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
   });
 
   it("truncates over-long text to 500 chars", async () => {
@@ -1410,5 +1413,222 @@ describe("Compete mode", () => {
     expect(buddyEvents.at(-1).found).toEqual([]);
     u1();
     u2();
+  });
+});
+
+// Phase 2: empty groups + configure flow.
+describe("POST /api/groups", () => {
+  it("creates an empty group with the host on the roster, no session yet", async () => {
+    const res = await app.fetch(
+      jsonReq("http://localhost/api/groups", { playerName: "Joel" }),
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.state).toBe("assembling");
+    expect(data.players).toHaveLength(1);
+    expect(data.players[0].name).toBe("Joel");
+    expect(data.hostId).toBe(data.playerId);
+    expect(data.messages).toEqual([]);
+    // No session = no board.
+    expect(data.letters).toBeUndefined();
+    expect(data.sessionId).toBeUndefined();
+  });
+
+  it("rejects an empty name", async () => {
+    const res = await app.fetch(
+      jsonReq("http://localhost/api/groups", { playerName: "" }),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("Multiplayer configure flow", () => {
+  async function emptyGroup() {
+    const res = await app.fetch(
+      jsonReq("http://localhost/api/groups", { playerName: "Host" }),
+    );
+    const host = await res.json();
+    const join = await app.fetch(
+      jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
+        playerName: "Buddy",
+      }),
+    );
+    const buddy = await join.json();
+    return {
+      gameId: host.gameId,
+      hostId: host.playerId,
+      buddyId: buddy.playerId,
+    };
+  }
+
+  it("first to claim wins; second claim 409s while first owns it", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    const a = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    expect(a.status).toBe(200);
+    const aData = await a.json();
+    expect(aData.state).toBe("configuring");
+    expect(aData.configuring.ownerId).toBe(hostId);
+    const b = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: buddyId,
+      }),
+    );
+    expect(b.status).toBe(409);
+  });
+
+  it("the owner can re-claim (idempotent), and cancel releases it", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    // Re-claim by owner is a no-op (same owner, no error).
+    const dup = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    expect(dup.status).toBe(200);
+    // Non-owner cancel is rejected.
+    const denied = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/cancel`, {
+        playerId: buddyId,
+      }),
+    );
+    expect(denied.status).toBe(403);
+    // Owner cancel releases.
+    const ok = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/cancel`, {
+        playerId: hostId,
+      }),
+    );
+    expect(ok.status).toBe(200);
+    const view = await ok.json();
+    expect(view.state).toBe("assembling");
+    expect(view.configuring).toBeUndefined();
+  });
+
+  it("commit creates a session straight to active and clears configuring", async () => {
+    const { gameId, hostId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/commit`, {
+        playerId: hostId,
+        mode: "multi",
+        timerMode: "up",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const view = await res.json();
+    expect(view.gameId).toBe(gameId);
+    expect(view.state).toBe("active");
+    expect(view.mode).toBe("multi");
+    expect(view.paused).toBe(false);
+    expect(typeof view.sessionId).toBe("string");
+    expect(view.configuring).toBeUndefined();
+  });
+
+  it("compete commit threads targetRank into the session", async () => {
+    const { gameId, hostId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/commit`, {
+        playerId: hostId,
+        mode: "compete",
+        timerMode: "up",
+        targetRank: 6,
+      }),
+    );
+    const view = await res.json();
+    expect(view.mode).toBe("compete");
+    expect(view.targetRank).toBe(6);
+  });
+
+  it("non-owner commit is rejected (403)", async () => {
+    const { gameId, hostId, buddyId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure/commit`, {
+        playerId: buddyId,
+        mode: "multi",
+        timerMode: "up",
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("chat works on an assembling group (no session yet)", async () => {
+    const { gameId, hostId } = await emptyGroup();
+    const res = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/chat`, {
+        playerId: hostId,
+        text: "hi",
+      }),
+    );
+    expect(res.status).toBe(200);
+    const view = await res.json();
+    expect(view.messages).toHaveLength(1);
+    expect(view.messages[0].text).toBe("hi");
+  });
+
+  it("after a session ends, configure re-opens; commit cuts a fresh session", async () => {
+    const { gameId, hostId } = await emptyGroup();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    const first = await (
+      await app.fetch(
+        jsonReq(`http://localhost/api/games/${gameId}/configure/commit`, {
+          playerId: hostId,
+          mode: "multi",
+          timerMode: "up",
+        }),
+      )
+    ).json();
+    await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/end`, {
+        playerId: hostId,
+      }),
+    );
+    // Re-enter configure on the ended session.
+    const claim = await app.fetch(
+      jsonReq(`http://localhost/api/games/${gameId}/configure`, {
+        playerId: hostId,
+      }),
+    );
+    expect(claim.status).toBe(200);
+    const second = await (
+      await app.fetch(
+        jsonReq(`http://localhost/api/games/${gameId}/configure/commit`, {
+          playerId: hostId,
+          mode: "compete",
+          timerMode: "up",
+          targetRank: 6,
+        }),
+      )
+    ).json();
+    expect(second.gameId).toBe(gameId); // URL stable
+    expect(second.sessionId).not.toBe(first.sessionId);
+    expect(second.mode).toBe("compete");
+    expect(second.state).toBe("active");
   });
 });

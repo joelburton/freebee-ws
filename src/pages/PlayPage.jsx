@@ -25,12 +25,17 @@ export default function PlayPage() {
         navigate("/", { replace: true });
         return;
       }
-      if (data.mode !== "multi" && data.mode !== "compete") {
+      if (data.mode === "solo") {
         navigate(`/p/${gameId}`, { replace: true });
         return;
       }
-      // Lobby is the lobby's job.
-      if (data.state === "lobby") {
+      // Lobby / assembling / configuring all live on the lobby route.
+      if (
+        data.state === "lobby" ||
+        data.state === "assembling" ||
+        data.state === "configuring" ||
+        data.configuring
+      ) {
         navigate(`/g/${gameId}`, { replace: true });
         return;
       }
@@ -39,7 +44,7 @@ export default function PlayPage() {
         saved &&
         saved.gameId === gameId &&
         saved.playerId &&
-        data.players.some((p) => p.playerId === saved.playerId);
+        data.players?.some((p) => p.playerId === saved.playerId);
       if (!valid) {
         // No identity for this game — fall back to the lobby route, which
         // will show the "already started" card.
@@ -54,6 +59,14 @@ export default function PlayPage() {
     };
   }, [gameId, navigate]);
 
+  function handleConfiguring() {
+    // Server flipped the group into configure mode (someone clicked
+    // "New setup" on the end card). Drop into the lobby route, which
+    // renders the configurator's form for the owner and a wait
+    // screen for everyone else.
+    navigate(`/g/${gameId}`, { replace: true });
+  }
+
   async function handleNewBoard() {
     // The URL stays the same across new-board (same group), so there's
     // no navigate to do — the WS push (and the response body, applied by
@@ -65,7 +78,18 @@ export default function PlayPage() {
     }
   }
 
-  function handleResetSetup() {
+  // "New setup" on the end card. For multi/compete: enter configure
+  // mode in the same group; the WS push then drops everyone into the
+  // lobby's configure UI. For solo, the same button is "back to home".
+  async function handleResetSetup() {
+    if (game?.mode === "multi" || game?.mode === "compete") {
+      try {
+        await postJson(`/api/games/${gameId}/configure`, { playerId });
+      } catch (e) {
+        setLoadError(e.message);
+      }
+      return;
+    }
     clearSavedState();
     navigate("/");
   }
@@ -83,6 +107,7 @@ export default function PlayPage() {
       playerId={playerId}
       onNewGame={handleNewBoard}
       onResetSetup={handleResetSetup}
+      onConfiguring={handleConfiguring}
     />
   );
 }

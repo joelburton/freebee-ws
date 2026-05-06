@@ -133,7 +133,7 @@ describe("LobbyPage", () => {
       ],
     ]);
     renderAt("g1");
-    await screen.findByRole("heading", { name: "Join game" });
+    await screen.findByRole("heading", { name: "Join group" });
     expect(screen.getByText(/Joel is waiting/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Join" })).toBeDisabled();
   });
@@ -161,7 +161,7 @@ describe("LobbyPage", () => {
     ]);
     const user = userEvent.setup();
     renderAt("g1");
-    await screen.findByRole("heading", { name: "Join game" });
+    await screen.findByRole("heading", { name: "Join group" });
     await user.type(screen.getByPlaceholderText("Name"), "Alice");
     await user.click(screen.getByRole("button", { name: "Join" }));
     await screen.findByRole("heading", { name: "Lobby" });
@@ -183,7 +183,7 @@ describe("LobbyPage", () => {
     ]);
     renderAt("g1");
     await screen.findByRole("heading", { name: "Lobby" });
-    expect(screen.queryByRole("heading", { name: "Join game" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Join group" })).toBeNull();
   });
 
   it("shows the host's Start button only to the host", async () => {
@@ -392,7 +392,7 @@ describe("LobbyPage", () => {
     ]);
     const user = userEvent.setup();
     renderAt("g1");
-    await screen.findByRole("heading", { name: "Join game" });
+    await screen.findByRole("heading", { name: "Join group" });
     await user.type(screen.getByPlaceholderText("Name"), "Alice");
     await user.click(screen.getByRole("button", { name: "Join" }));
     await waitFor(() => {
@@ -409,7 +409,7 @@ describe("LobbyPage", () => {
       ],
     ]);
     renderAt("g1", { strict: true });
-    await screen.findByRole("heading", { name: "Join game" });
+    await screen.findByRole("heading", { name: "Join group" });
   });
 
   it("live WS state events update the lobby roster", async () => {

@@ -1,7 +1,9 @@
 import {
   getSession,
-  getMember,
+  getGroup,
+  getGroupForId,
   clientView,
+  groupView,
   subscribeToSession,
   presenceConnect,
   presenceDisconnect,
@@ -35,6 +37,22 @@ export function registerWebSocket(app, upgradeWebSocket) {
         }
       };
 
+      // Resolve the URL id to (session?, group?). Empty groups (no
+      // session yet) still subscribe — chat and configure flow over WS
+      // before any board exists.
+      const resolve = () => {
+        const session = getSession(gameId);
+        const group = session ? getGroup(session) : getGroupForId(gameId);
+        return { session, group };
+      };
+
+      const renderView = ({ session, group }) =>
+        session
+          ? clientView(session, playerId)
+          : group
+            ? groupView(group, playerId)
+            : null;
+
       const teardown = () => {
         if (closed) return;
         closed = true;
@@ -42,29 +60,30 @@ export function registerWebSocket(app, upgradeWebSocket) {
         if (heartbeat) clearInterval(heartbeat);
         if (presenceCounted) {
           presenceCounted = false;
-          const s = getSession(gameId);
-          if (s) presenceDisconnect(s, playerId);
+          const { group } = resolve();
+          if (group) presenceDisconnect(group, playerId);
         }
       };
 
       return {
         onOpen(_evt, ws) {
-          const session = getSession(gameId);
-          if (!session) {
+          const r = resolve();
+          if (!r.session && !r.group) {
             ws.close(4404, "Game not found");
             return;
           }
 
-          // Count presence first so the initial view already reflects it.
-          if (getMember(session, playerId)) {
-            presenceConnect(session, playerId);
+          if (
+            playerId &&
+            r.group &&
+            r.group.players.some((p) => p.playerId === playerId)
+          ) {
+            presenceConnect(r.group, playerId);
             presenceCounted = true;
           }
 
-          sendJson(ws, {
-            type: "state",
-            view: clientView(session, playerId),
-          });
+          const initial = renderView(resolve());
+          if (initial) sendJson(ws, { type: "state", view: initial });
 
           unsubscribe = subscribeToSession(
             gameId,
@@ -75,8 +94,8 @@ export function registerWebSocket(app, upgradeWebSocket) {
           );
 
           heartbeat = setInterval(() => {
-            const s = getSession(gameId);
-            if (!s) {
+            const r2 = resolve();
+            if (!r2.session && !r2.group) {
               try {
                 ws.close();
               } catch {
@@ -84,10 +103,8 @@ export function registerWebSocket(app, upgradeWebSocket) {
               }
               return;
             }
-            sendJson(ws, {
-              type: "heartbeat",
-              view: clientView(s, playerId),
-            });
+            const view = renderView(r2);
+            if (view) sendJson(ws, { type: "heartbeat", view });
           }, HEARTBEAT_MS);
         },
         onClose() {

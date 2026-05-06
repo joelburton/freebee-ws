@@ -39,6 +39,7 @@ export default function Game({
   game,
   onNewGame,
   onResetSetup,
+  onConfiguring,
   playerId = null,
 }) {
   const [found, setFound] = useState(game.found || []);
@@ -250,6 +251,7 @@ export default function Game({
     return () => ws.close();
     // applyServerView closes over current state setters; we only want
     // to reopen the socket on gameId/playerId change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.gameId, playerId]);
 
   // Apply a server response that includes a clientView (pause/resume/end
@@ -271,6 +273,9 @@ export default function Game({
     // Compete only — winnerId on end, missedByMe on the post-end view.
     if (data.winnerId !== undefined) setWinnerId(data.winnerId || null);
     if (data.missedByMe !== undefined) setMissedByMe(data.missedByMe);
+    // Group entered configure mode (someone clicked "New setup"). Hand
+    // off to the parent so it can navigate to the lobby's setup screen.
+    if (data.configuring && onConfiguring) onConfiguring();
   }
 
   async function endGameOnServer() {

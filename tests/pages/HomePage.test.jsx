@@ -288,72 +288,38 @@ describe("HomePage", () => {
   });
 });
 
-describe("HomePage · Co-op tab", () => {
-  async function openCoopTab(user) {
-    await user.click(screen.getByRole("tab", { name: "Co-op" }));
+describe('HomePage · "Play with friends" tab', () => {
+  async function openFriendsTab(user) {
+    await user.click(screen.getByRole("tab", { name: /Play with friends/i }));
   }
 
-  it("solo tab shows by default; co-op controls aren't rendered", () => {
+  it("solo tab shows by default; friends controls aren't rendered", () => {
     render(<HomePage />);
     expect(
       screen.getByRole("tabpanel", { name: "Solo" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
-        name: /Start co-op with random letters/i,
+        name: /Create group and invite friends/i,
       }),
     ).toBeNull();
   });
 
-  it("disables Start until a name is entered", async () => {
+  it("disables Go until a name is entered", async () => {
     const user = userEvent.setup();
     render(<HomePage />);
-    await openCoopTab(user);
-    const start = screen.getByRole("button", {
-      name: /Start co-op with random letters/i,
-    });
-    expect(start).toBeDisabled();
-  });
-
-  it("Start (random) posts /api/games with playerName and navigates to /g/<id>", async () => {
-    mockFetch([
-      [
-        (url, opts) => url === "/api/games" && opts?.method === "POST",
-        async () => ({
-          ok: true,
-          json: async () => ({
-            ...fakeGame,
-            mode: "multi",
-            state: "lobby",
-            playerId: "host-1",
-          }),
-        }),
-      ],
-    ]);
-    const user = userEvent.setup();
-    render(<HomePage />);
-    await openCoopTab(user);
-    await user.type(screen.getByPlaceholderText("Name"), "Joel");
-    await user.click(
+    await openFriendsTab(user);
+    expect(
       screen.getByRole("button", {
-        name: /Start co-op with random letters/i,
+        name: /Create group and invite friends/i,
       }),
-    );
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/api/games");
-    const body = JSON.parse(opts.body);
-    expect(body.playerName).toBe("Joel");
-    expect(body.timerMode).toBe("none");
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/g/g1"));
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
-    expect(stored).toEqual({ gameId: "g1", playerId: "host-1" });
+    ).toBeDisabled();
   });
 
   it("name field label is marked required (red) when empty, normal once filled", async () => {
     const user = userEvent.setup();
     render(<HomePage />);
-    await openCoopTab(user);
+    await openFriendsTab(user);
     const nameInput = screen.getByPlaceholderText("Name");
     expect(
       nameInput.closest("label").classList.contains("is-required-empty"),
@@ -365,163 +331,43 @@ describe("HomePage · Co-op tab", () => {
     ).toBe(false);
   });
 
-  it("Start (custom) requires both name and letters", async () => {
-    const user = userEvent.setup();
-    render(<HomePage />);
-    await openCoopTab(user);
-    const start = screen.getByRole("button", {
-      name: /Start co-op with chosen letters/i,
-    });
-    expect(start).toBeDisabled();
-    await user.type(screen.getByPlaceholderText("Name"), "Joel");
-    expect(start).toBeDisabled();
-    await user.type(screen.getByPlaceholderText("A"), "R");
-    await user.type(screen.getByPlaceholderText("BCDEFG"), "BDEINT");
-    expect(start).not.toBeDisabled();
-  });
-});
-
-describe("HomePage · Compete tab", () => {
-  async function openCompeteTab(user) {
-    await user.click(screen.getByRole("tab", { name: "Compete" }));
-  }
-
-  it("Start (random, first-to-Genius) posts mode='compete' + targetRank=6", async () => {
+  it("posts to /api/groups, navigates to /g/<id>, saves localStorage + name", async () => {
     mockFetch([
       [
-        (url, opts) => url === "/api/games" && opts?.method === "POST",
+        (url, opts) => url === "/api/groups" && opts?.method === "POST",
         async () => ({
           ok: true,
           json: async () => ({
-            ...fakeGame,
-            mode: "compete",
-            state: "lobby",
+            gameId: "g1",
+            state: "assembling",
             playerId: "host-1",
+            hostId: "host-1",
+            players: [
+              { playerId: "host-1", name: "Joel", color: "#1976d2", online: true },
+            ],
+            messages: [],
           }),
         }),
       ],
     ]);
     const user = userEvent.setup();
     render(<HomePage />);
-    await openCompeteTab(user);
+    await openFriendsTab(user);
     await user.type(screen.getByPlaceholderText("Name"), "Joel");
     await user.click(
       screen.getByRole("button", {
-        name: /Start compete with random letters/i,
+        name: /Create group and invite friends/i,
       }),
     );
     await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body.mode).toBe("compete");
-    expect(body.playerName).toBe("Joel");
-    expect(body.targetRank).toBe(6);
-    expect(body.timerMode).toBe("up");
-    expect(body.countdownSeconds).toBeUndefined();
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/groups");
+    expect(JSON.parse(opts.body)).toEqual({ playerName: "Joel" });
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/g/g1"));
-  });
-
-  it("switching the rank dropdown changes targetRank in the body", async () => {
-    mockFetch([
-      [
-        (url, opts) => url === "/api/games" && opts?.method === "POST",
-        async () => ({
-          ok: true,
-          json: async () => ({
-            ...fakeGame,
-            mode: "compete",
-            playerId: "host-1",
-          }),
-        }),
-      ],
-    ]);
-    const user = userEvent.setup();
-    render(<HomePage />);
-    await openCompeteTab(user);
-    await user.type(screen.getByPlaceholderText("Name"), "Joel");
-    await user.selectOptions(screen.getByLabelText("Target rank"), "4");
-    await user.click(
-      screen.getByRole("button", {
-        name: /Start compete with random letters/i,
-      }),
-    );
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body.targetRank).toBe(4);
-  });
-
-  it("countdown end condition posts timerMode='down' + countdownSeconds, no targetRank", async () => {
-    mockFetch([
-      [
-        (url, opts) => url === "/api/games" && opts?.method === "POST",
-        async () => ({
-          ok: true,
-          json: async () => ({
-            ...fakeGame,
-            mode: "compete",
-            playerId: "host-1",
-          }),
-        }),
-      ],
-    ]);
-    const user = userEvent.setup();
-    render(<HomePage />);
-    await openCompeteTab(user);
-    await user.type(screen.getByPlaceholderText("Name"), "Joel");
-    await user.click(screen.getByRole("radio", { name: /Countdown/ }));
-    await user.click(
-      screen.getByRole("button", {
-        name: /Start compete with random letters/i,
-      }),
-    );
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
-    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
-    expect(body.mode).toBe("compete");
-    expect(body.timerMode).toBe("down");
-    expect(body.countdownSeconds).toBe(300);
-    expect(body.targetRank).toBeUndefined();
-  });
-
-  it("disables Go until a name is entered", async () => {
-    const user = userEvent.setup();
-    render(<HomePage />);
-    await openCompeteTab(user);
-    expect(
-      screen.getByRole("button", {
-        name: /Start compete with random letters/i,
-      }),
-    ).toBeDisabled();
-  });
-
-  it("saves the player name on successful create and pre-fills it next mount", async () => {
-    mockFetch([
-      [
-        (url, opts) => url === "/api/games" && opts?.method === "POST",
-        async () => ({
-          ok: true,
-          json: async () => ({
-            ...fakeGame,
-            mode: "compete",
-            playerId: "host-1",
-          }),
-        }),
-      ],
-    ]);
-    const user = userEvent.setup();
-    const { unmount } = render(<HomePage />);
-    await openCompeteTab(user);
-    await user.type(screen.getByPlaceholderText("Name"), "Joel");
-    await user.click(
-      screen.getByRole("button", {
-        name: /Start compete with random letters/i,
-      }),
-    );
-    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY))).toEqual({
+      gameId: "g1",
+      playerId: "host-1",
+    });
     expect(window.localStorage.getItem("freebee:name")).toBe("Joel");
-    unmount();
-
-    // Re-mount: name input pre-filled from localStorage.
-    render(<HomePage />);
-    await openCompeteTab(user);
-    expect(screen.getByPlaceholderText("Name")).toHaveValue("Joel");
   });
 });
