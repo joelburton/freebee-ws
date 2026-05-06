@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   clearSavedState,
+  loadSavedName,
   loadSavedState,
+  saveSavedName,
   saveState,
   setBanner,
 } from "../components/storage";
@@ -13,7 +15,7 @@ export default function LobbyPage() {
   const navigate = useNavigate();
   const [game, setGame] = useState(null);
   const [playerId, setPlayerId] = useState(null);
-  const [nameInput, setNameInput] = useState("");
+  const [nameInput, setNameInput] = useState(() => loadSavedName());
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
   const [copyMsg, setCopyMsg] = useState("");
@@ -30,7 +32,7 @@ export default function LobbyPage() {
         navigate("/", { replace: true });
         return;
       }
-      if (data.mode !== "multi") {
+      if (data.mode !== "multi" && data.mode !== "compete") {
         setBanner("That isn't a multiplayer game.");
         navigate("/", { replace: true });
         return;
@@ -98,6 +100,7 @@ export default function LobbyPage() {
       });
       setGame(data);
       setPlayerId(data.playerId);
+      saveSavedName(name);
       saveState({ gameId, playerId: data.playerId });
     } catch (e) {
       setActionError(e.message);

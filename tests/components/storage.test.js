@@ -5,10 +5,12 @@ import {
   clearSavedState,
   setBanner,
   takeBanner,
+  loadSavedName,
+  saveSavedName,
 } from "../../src/components/storage";
 
 beforeEach(() => {
-  window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.clear();
 });
 
 describe("storage", () => {
@@ -76,6 +78,30 @@ describe("storage", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("saved name", () => {
+  it("returns empty string when nothing is stored", () => {
+    expect(loadSavedName()).toBe("");
+  });
+
+  it("saveSavedName then loadSavedName round-trips", () => {
+    saveSavedName("Joel");
+    expect(loadSavedName()).toBe("Joel");
+  });
+
+  it("trims and caps to 32 chars on save", () => {
+    saveSavedName("  Joel  ");
+    expect(loadSavedName()).toBe("Joel");
+    saveSavedName("x".repeat(50));
+    expect(loadSavedName()).toBe("x".repeat(32));
+  });
+
+  it("does not overwrite when given an empty/whitespace name", () => {
+    saveSavedName("Joel");
+    saveSavedName("   ");
+    expect(loadSavedName()).toBe("Joel");
   });
 });
 

@@ -62,3 +62,27 @@ export function takeBanner() {
     return null;
   }
 }
+
+// Player name persists in its own slot, separate from STORAGE_KEY (which
+// is per-game state). It pre-fills the name field on the home page and
+// the lobby join card so the player doesn't retype it every session.
+const NAME_KEY = "freebee:name";
+
+export function loadSavedName() {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveSavedName(name) {
+  if (typeof window === "undefined") return;
+  try {
+    const trimmed = String(name || "").trim().slice(0, 32);
+    if (trimmed) window.localStorage.setItem(NAME_KEY, trimmed);
+  } catch {
+    // ignore
+  }
+}

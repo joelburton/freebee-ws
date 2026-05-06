@@ -26,7 +26,7 @@ export default function PlayPage() {
         navigate("/", { replace: true });
         return;
       }
-      if (data.mode !== "multi") {
+      if (data.mode !== "multi" && data.mode !== "compete") {
         navigate(`/p/${gameId}`, { replace: true });
         return;
       }

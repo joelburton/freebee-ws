@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   clearSavedState,
+  loadSavedName,
   loadSavedState,
+  saveSavedName,
   saveState,
   takeBanner,
 } from "../components/storage";
@@ -26,8 +28,9 @@ export default function HomePage() {
   const [countdownInput, setCountdownInput] = useState("5:00");
 
   // Multiplayer (co-op + compete) shares the player-name input — same
-  // concept, no point making the user type their name twice.
-  const [nameInput, setNameInput] = useState("");
+  // concept, no point making the user type their name twice. Defaulted
+  // from localStorage so returning players don't re-type their name.
+  const [nameInput, setNameInput] = useState(() => loadSavedName());
 
   // Co-op card state.
   const [centerInputCoop, setCenterInputCoop] = useState("");
@@ -137,6 +140,7 @@ export default function HomePage() {
         countdownSeconds,
         ...extra,
       });
+      saveSavedName(cleanName);
       saveState({ gameId: data.gameId, playerId: data.playerId });
       navigate(`/g/${data.gameId}`);
     } catch (e) {
@@ -184,6 +188,7 @@ export default function HomePage() {
     setError("");
     try {
       const data = await postJson("/api/games", body);
+      saveSavedName(cleanName);
       saveState({ gameId: data.gameId, playerId: data.playerId });
       navigate(`/g/${data.gameId}`);
     } catch (e) {

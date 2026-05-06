@@ -44,7 +44,7 @@ const render = (ui) => rtlRender(ui, { wrapper: MemoryRouter });
 
 beforeEach(() => {
   navigateMock.mockClear();
-  window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.clear();
   window.sessionStorage.clear();
   vi.restoreAllMocks();
 });
@@ -490,5 +490,38 @@ describe("HomePage · Compete tab", () => {
         name: /Start compete with random letters/i,
       }),
     ).toBeDisabled();
+  });
+
+  it("saves the player name on successful create and pre-fills it next mount", async () => {
+    mockFetch([
+      [
+        (url, opts) => url === "/api/games" && opts?.method === "POST",
+        async () => ({
+          ok: true,
+          json: async () => ({
+            ...fakeGame,
+            mode: "compete",
+            playerId: "host-1",
+          }),
+        }),
+      ],
+    ]);
+    const user = userEvent.setup();
+    const { unmount } = render(<HomePage />);
+    await openCompeteTab(user);
+    await user.type(screen.getByPlaceholderText("Name"), "Joel");
+    await user.click(
+      screen.getByRole("button", {
+        name: /Start compete with random letters/i,
+      }),
+    );
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    expect(window.localStorage.getItem("freebee:name")).toBe("Joel");
+    unmount();
+
+    // Re-mount: name input pre-filled from localStorage.
+    render(<HomePage />);
+    await openCompeteTab(user);
+    expect(screen.getByPlaceholderText("Name")).toHaveValue("Joel");
   });
 });
