@@ -70,6 +70,40 @@ function newId() {
   return globalThis.crypto.randomUUID();
 }
 
+// Game IDs appear in shareable URLs (/g/<id>, /p/<id>), so we want
+// something a friend can read off an SMS without typos. Two short words
+// joined by a hyphen ("penguin-orange") gives ~hundreds of thousands of
+// combinations against a typical handful of concurrent active games —
+// collisions are vanishingly rare, but we retry just in case. The pool
+// is the scoring word list (smaller, higher-quality SCOWL) filtered to
+// 4–6 letters for typeability.
+function buildGameIdPool(data) {
+  const pool = [];
+  for (let i = 0; i < data.words.length; i++) {
+    if (!data.inScoring[i]) continue;
+    const len = data.lengths[i];
+    if (len >= 4 && len <= 6) pool.push(data.words[i]);
+  }
+  return pool;
+}
+
+let gameIdPool = null;
+function pickGameId(data) {
+  if (!gameIdPool) gameIdPool = buildGameIdPool(data);
+  const pool = gameIdPool;
+  for (let i = 0; i < 50; i++) {
+    const a = pool[Math.floor(Math.random() * pool.length)];
+    const b = pool[Math.floor(Math.random() * pool.length)];
+    const id = `${a}-${b}`;
+    if (!STORE.has(id)) return id;
+  }
+  // Defensive: if we somehow keep colliding, suffix with a UUID slice
+  // so we never hand back a duplicate.
+  const a = pool[Math.floor(Math.random() * pool.length)];
+  const b = pool[Math.floor(Math.random() * pool.length)];
+  return `${a}-${b}-${newId().slice(0, 4)}`;
+}
+
 function nextColor(players) {
   const used = new Set(players.map((p) => p.color));
   for (const c of PLAYER_COLORS) {
@@ -92,7 +126,7 @@ function makePlayer(name, color) {
   };
 }
 
-function buildSession(board, opts = {}) {
+function buildSession(board, opts = {}, id) {
   const {
     timerMode = "up",
     countdownSeconds = 0,
@@ -118,7 +152,7 @@ function buildSession(board, opts = {}) {
   const timerRunning = !startPaused && timerMode !== "none";
 
   return {
-    id: newId(),
+    id,
     mode,
     state: isMulti ? "lobby" : "active",
     hostId,
@@ -206,7 +240,7 @@ function maybeAutoEnd(session) {
 
 export async function createRandomSession(opts = {}) {
   const data = await loadData();
-  const session = buildSession(makeGame(data), opts);
+  const session = buildSession(makeGame(data), opts, pickGameId(data));
   STORE.set(session.id, session);
   return session;
 }
@@ -219,7 +253,7 @@ export async function createCustomSession({ letters, center, ...opts }) {
   if (board.wordlist.length === 0) {
     return { error: "No valid words for these letters" };
   }
-  const session = buildSession(board, opts);
+  const session = buildSession(board, opts, pickGameId(data));
   STORE.set(session.id, session);
   return session;
 }
@@ -364,7 +398,7 @@ export async function newBoardFromSession(oldSession) {
   const board = makeGame(data);
   const now = Date.now();
   const session = {
-    id: newId(),
+    id: pickGameId(data),
     mode: "multi",
     state: "active",
     hostId: oldSession.hostId,
@@ -573,4 +607,5 @@ export function _resetStore() {
   SUBS.clear();
   lastSweepAt = 0;
   dataPromise = null;
+  gameIdPool = null;
 }

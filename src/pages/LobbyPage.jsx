@@ -120,16 +120,17 @@ export default function LobbyPage() {
 
   function handleCopyLink() {
     const url = window.location.href;
+    const flash = (msg) => {
+      setCopyMsg(msg);
+      setTimeout(() => setCopyMsg(""), 2000);
+    };
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(
-        () => {
-          setCopyMsg("Link copied!");
-          setTimeout(() => setCopyMsg(""), 2000);
-        },
-        () => setCopyMsg("Copy failed"),
+        () => flash("Link copied!"),
+        () => flash("Copy failed"),
       );
     } else {
-      setCopyMsg(url);
+      flash("Copy failed");
     }
   }
 
@@ -231,16 +232,13 @@ export default function LobbyPage() {
             </li>
           ))}
         </ul>
-        <div className="App-lobby-share">
-          <button
-            type="button"
-            className="App-start-go App-lobby-share-btn"
-            onClick={handleCopyLink}
-          >
-            Copy share link
-          </button>
-          {copyMsg && <span className="App-lobby-copy-msg">{copyMsg}</span>}
-        </div>
+        <button
+          type="button"
+          className="App-start-go"
+          onClick={handleCopyLink}
+        >
+          {copyMsg || "Copy share link"}
+        </button>
         {isHost ? (
           <button
             type="button"

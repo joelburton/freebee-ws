@@ -38,7 +38,10 @@ describe("POST /api/games (create)", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(typeof data.gameId).toBe("string");
-    expect(data.gameId).toMatch(/^[0-9a-f-]{36}$/);
+    // Two short words joined by a hyphen, e.g. "penguin-orange". The
+    // defensive fallback in pickGameId may add a `-xxxx` UUID slice if
+    // collisions exhaust the retry loop, so allow an optional 3rd part.
+    expect(data.gameId).toMatch(/^[a-z]{4,6}-[a-z]{4,6}(?:-[0-9a-f]{4})?$/);
     expect(data.letters).toHaveLength(6);
     expect(data.center).toHaveLength(1);
     expect(data.words).toBeGreaterThanOrEqual(30);

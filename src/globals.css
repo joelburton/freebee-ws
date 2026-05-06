@@ -554,22 +554,15 @@ code {
   background: #f4f4f4;
 }
 
-.App-lobby-share {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* The share button is a regular .App-start-go but we drop the
-   margin-left: auto so it sits inline with the copy-confirmation
-   message instead of being shoved to the row's far right. */
-.App-lobby-share-btn {
+/* Lobby card buttons (Copy share link + Start game). The base
+   .App-start-go is designed for the home page rows where it has
+   margin-left: auto to push to the right edge; here we want both
+   buttons left-aligned at intrinsic width, so we override both
+   align-self (otherwise stretches in the column flex card) and
+   margin-left (otherwise gets pushed right). */
+.App-card-lobby > .App-start-go {
+  align-self: flex-start;
   margin-left: 0;
-}
-
-.App-lobby-copy-msg {
-  font-size: 13px;
-  color: var(--muted);
 }
 
 /* Offline players (also used in the in-game roster, §8) fade out so
