@@ -713,10 +713,12 @@ function Leaderboard({ players, playerId, winnerId, ended, onLeave }) {
             style={{ "--player-color": p.color }}
           >
             <span className="Game-roster-dot" aria-hidden="true" />
-            <span className="Game-leaderboard-name">{p.name}</span>
-            {p.playerId === playerId && onLeave && (
-              <LeaveX onClick={onLeave} />
-            )}
+            <span className="Game-leaderboard-id">
+              <span className="Game-leaderboard-name">{p.name}</span>
+              {p.playerId === playerId && onLeave && (
+                <LeaveX onClick={onLeave} />
+              )}
+            </span>
             {atTop && sharedTop && (
               <span className="Game-roster-tag Game-roster-tag-tied">
                 tied

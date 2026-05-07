@@ -596,6 +596,7 @@ code {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  flex: none;
 }
 
 .Roster-leave:hover:not(:disabled) {
@@ -1012,8 +1013,19 @@ code {
   opacity: 0.45;
 }
 
-.Game-leaderboard-name {
+/* Wrapper around name + leave-× so the × sits immediately to the right
+   of the name text. The wrapper itself takes flex: 1 to push the right
+   group (winner/tied tag, score, count) to the row's right edge. */
+.Game-leaderboard-id {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.Game-leaderboard-name {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
