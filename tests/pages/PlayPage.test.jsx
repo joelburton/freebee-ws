@@ -250,4 +250,49 @@ describe("PlayPage", () => {
       playerId: "host-1",
     });
   });
+
+  it("re-renders with the new board's letters when a WS push carries a fresh sessionId", async () => {
+    // Regression: a new-board push (same gameId, new sessionId) used to
+    // leave the displayed letters frozen on the previous board because
+    // <Game> kept its outer-letters state and PlayPage's `key` never
+    // flipped. The fix bubbles the view up so the key changes and Game
+    // remounts with the new letters.
+    const ended = {
+      ...baseActive,
+      sessionId: "s1",
+      state: "ended",
+      ended: true,
+      revealList: [],
+    };
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ gameId: "g1", playerId: "host-1" }),
+    );
+    mockFetch([
+      [
+        (url) => url === "/api/games/g1",
+        async () => ({ ok: true, json: async () => ended }),
+      ],
+    ]);
+    renderAt("g1");
+    // Original board letters appear (B D E I N T center R).
+    await screen.findByText("B");
+    expect(screen.queryByText("L")).not.toBeInTheDocument();
+    const ws = FakeWebSocket.instances.find((s) =>
+      s.url.startsWith("ws://localhost:3000/ws/g1"),
+    );
+    act(() => {
+      ws.emit({
+        ...baseActive,
+        sessionId: "s2",
+        state: "active",
+        ended: false,
+        letters: "acglmp",
+        center: "o",
+      });
+    });
+    // New letters now visible; an old-only letter is gone.
+    await waitFor(() => expect(screen.getByText("L")).toBeInTheDocument());
+    expect(screen.queryByText("B")).not.toBeInTheDocument();
+  });
 });

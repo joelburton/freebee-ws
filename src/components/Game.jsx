@@ -40,6 +40,7 @@ export default function Game({
   onNewGame,
   onResetSetup,
   onConfiguring,
+  onBoardChange,
   onLeave,
   playerId = null,
 }) {
@@ -259,6 +260,19 @@ export default function Game({
   // returns). Submit responses don't include these fields and are handled
   // separately.
   function applyServerView(data) {
+    // New-board cuts a fresh session under the same group. The board
+    // (letters/center) is stored locally and not touched by the field-
+    // by-field merge below, so we hand the whole view to the parent and
+    // let its `key={sessionId}` remount us with the new props.
+    if (
+      data.sessionId &&
+      game.sessionId &&
+      data.sessionId !== game.sessionId &&
+      onBoardChange
+    ) {
+      onBoardChange(data);
+      return;
+    }
     if (typeof data.elapsed === "number") setServerElapsed(data.elapsed);
     if (typeof data.paused === "boolean") setPaused(data.paused);
     if (typeof data.ended === "boolean") setEnded(data.ended);

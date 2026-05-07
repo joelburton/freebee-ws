@@ -67,6 +67,13 @@ export default function PlayPage() {
     navigate(`/g/${gameId}`, { replace: true });
   }
 
+  // Server cut a fresh session under the same group (new-board). Replace
+  // game so the React key flips and <Game> remounts with the new
+  // letters / center.
+  function handleBoardChange(view) {
+    setGame(view);
+  }
+
   async function handleNewBoard() {
     // The URL stays the same across new-board (same group), so there's
     // no navigate to do — the WS push (and the response body, applied by
@@ -118,6 +125,7 @@ export default function PlayPage() {
       onNewGame={handleNewBoard}
       onResetSetup={handleResetSetup}
       onConfiguring={handleConfiguring}
+      onBoardChange={handleBoardChange}
       onLeave={handleLeave}
     />
   );
