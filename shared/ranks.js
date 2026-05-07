@@ -14,7 +14,7 @@ export const RANKS = [
 
 // Score-fraction at which "Genius" is reached. Other ranks are spaced
 // linearly between 0 and this value.
-export const GENIUS_AT = 0.65;
+export const GENIUS_AT = 0.68;
 
 export function rankThreshold(i) {
   return (i / (RANKS.length - 1)) * GENIUS_AT;

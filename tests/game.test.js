@@ -15,6 +15,10 @@ import {
   scoreFor,
   MIN_FOUND,
 } from "../server/game.js";
+import {
+  LEGAL_WORDS_FILE,
+  SCORING_WORDS_FILE,
+} from "../server/sessions.js";
 
 function maskOf(s) {
   return s.split("").reduce((m, c) => m | letterBit(c), 0);
@@ -167,8 +171,8 @@ describe("makeGame against the real word lists", () => {
   beforeAll(async () => {
     const dir = path.join(process.cwd(), "data");
     const [legalText, scoringText] = await Promise.all([
-      fs.readFile(path.join(dir, "scowl-70.txt"), "utf8"),
-      fs.readFile(path.join(dir, "scowl-50.txt"), "utf8"),
+      fs.readFile(path.join(dir, LEGAL_WORDS_FILE), "utf8"),
+      fs.readFile(path.join(dir, SCORING_WORDS_FILE), "utf8"),
     ]);
     data = processWords(legalText, scoringText);
   });

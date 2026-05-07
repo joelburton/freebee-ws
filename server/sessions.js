@@ -23,6 +23,21 @@ import { currentRankIndex } from "../shared/ranks.js";
 //   (session-level) both fan out to the same listeners.
 // ===========================================================================
 
+// Word list filenames in data/. Two SCOWL sizes serve two different
+// roles; both must live in `data/` (see scowl-*.txt there).
+//
+// LEGAL_WORDS_FILE — the larger set, used to validate input. A word
+//   the player submits must be in this set to be accepted.
+// SCORING_WORDS_FILE — a smaller, higher-quality subset used to
+//   generate random boards, populate the rank/score totals, and drive
+//   the post-game reveal. Must be a subset of the legal list (and is
+//   by construction, since SCOWL sizes nest).
+//
+// Swap these to experiment with different SCOWL sizes; the rest of the
+// pipeline reads from them via loadData() below.
+export const LEGAL_WORDS_FILE = "scowl-80.txt";
+export const SCORING_WORDS_FILE = "scowl-50.txt";
+
 // HMR-safe: surviving dev hot reloads keeps in-flight games intact.
 const STORE = (globalThis.__freebeeSessions ??= new Map());
 const GROUPS = (globalThis.__freebeeGroups ??= new Map());
@@ -60,8 +75,8 @@ function loadData() {
     dataPromise = (async () => {
       const dir = path.join(process.cwd(), "data");
       const [legalText, scoringText] = await Promise.all([
-        fs.readFile(path.join(dir, "scowl-70.txt"), "utf8"),
-        fs.readFile(path.join(dir, "scowl-50.txt"), "utf8"),
+        fs.readFile(path.join(dir, LEGAL_WORDS_FILE), "utf8"),
+        fs.readFile(path.join(dir, SCORING_WORDS_FILE), "utf8"),
       ]);
       return processWords(legalText, scoringText);
     })();
