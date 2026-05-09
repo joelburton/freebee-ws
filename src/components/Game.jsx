@@ -89,6 +89,7 @@ export default function Game({
     : submitFeedback;
   const chatRef = useRef(null);
   const keyHandlerRef = useRef(null);
+  const lastWordRef = useRef("");
   const submitting = useRef(false);
   const togglingPause = useRef(false);
   // Pagination state surfaced from <WordList> via its onPagination prop;
@@ -232,7 +233,14 @@ export default function Game({
       setWord((w) => w.slice(0, -1));
     } else if (e.key === "Enter") {
       if (!word) return;
+      lastWordRef.current = word;
       tryWord(word);
+      setWord("");
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (lastWordRef.current) setWord(lastWordRef.current);
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
       setWord("");
     } else if (
       e.key.length === 1 &&
@@ -407,6 +415,7 @@ export default function Game({
   function handleSubmit(evt) {
     evt.preventDefault();
     if (locked || !word) return;
+    lastWordRef.current = word;
     tryWord(word);
     setWord("");
   }

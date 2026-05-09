@@ -96,7 +96,11 @@ code {
   font-size: 24px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  color: var(--accent);
+  color: #111;
+  background: var(--accent);
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 6px;
 }
 
 /* Home-only modifier: a bigger, more prominent title for the landing
@@ -124,7 +128,11 @@ code {
   font-size: 22px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  color: var(--accent);
+  color: #111;
+  background: var(--accent);
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 6px;
 }
 
 /* ---------- 4. Pre-game pages ----------
@@ -671,9 +679,6 @@ code {
   align-items: center;
   justify-content: center;
   padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
   font-size: 22px;
   font-weight: 800;
   text-align: center;
@@ -1767,8 +1772,6 @@ code {
     gap: 0;
   }
 
-  /* Less internal padding on the word display — desktop's 14px feels
-     bloated on phone where vertical space is at a premium. */
   .WordInput {
     padding: 8px 12px;
     min-height: 38px;
