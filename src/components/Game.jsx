@@ -225,7 +225,7 @@ export default function Game({
     if (locked) return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
-    if (e.key === "/" && chatRef.current) {
+    if ((e.key === "/" || (e.key === "Tab" && !e.shiftKey)) && chatRef.current) {
       e.preventDefault();
       chatRef.current.openAndFocus();
     } else if (e.key === "Backspace") {
