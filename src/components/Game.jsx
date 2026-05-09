@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import Letters from "./Letters";
 import Feedback from "./Feedback";
 import WordList from "./WordList";
@@ -436,11 +435,7 @@ export default function Game({
     <div className="Game">
       <div className="Game-board">
         <header className="Game-title">
-          <h1>
-            <Link href="/" onClick={onResetSetup}>
-              Freebee
-            </Link>
-          </h1>
+          <h1>Freebee</h1>
         </header>
         <form
           className={`Game-form${locked ? " is-locked" : ""}${
