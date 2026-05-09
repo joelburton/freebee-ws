@@ -177,6 +177,7 @@ const Chat = forwardRef(function Chat(
   function handleInputKeyDown(e) {
     if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
     } else if (e.key === "Escape") {
       setOpen(false);
