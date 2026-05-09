@@ -1,6 +1,29 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import WordList from "../../src/components/WordList";
+
+// After a click, the popover renders the word too — getByText("tribe")
+// would find both the list item and the popover. Always click the
+// list item (the first match).
+function clickWord(word) {
+  return userEvent.setup().click(screen.getAllByText(word)[0]);
+}
+
+const fetchDefinitionMock = vi.fn();
+vi.mock("../../src/api.js", () => ({
+  fetchDefinition: (word) => fetchDefinitionMock(word),
+}));
+
+const { default: WordList } = await import("../../src/components/WordList");
+
+beforeEach(() => {
+  fetchDefinitionMock.mockReset();
+  // Desktop by default; phone-suite tests override.
+  window.matchMedia = vi.fn().mockReturnValue({
+    matches: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+});
 
 describe("WordList", () => {
   it("shows empty placeholder when no words", () => {
@@ -154,5 +177,146 @@ describe("WordList", () => {
     render(<WordList found={["a", "b", "c", "d", "e"]} pageSize={2} />);
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByText("1 / 3")).toBeInTheDocument();
+  });
+});
+
+describe("WordList: definition popover", () => {
+  it("clicking a word fetches and displays the definition", async () => {
+    fetchDefinitionMock.mockResolvedValue("a small social group");
+    render(<WordList found={["tribe", "trident"]} />);
+    await userEvent.setup().click(screen.getByText("tribe"));
+    expect(fetchDefinitionMock).toHaveBeenCalledWith("tribe");
+    await screen.findByRole("dialog", { name: /Definition of tribe/i });
+    expect(screen.getByText("a small social group")).toBeInTheDocument();
+  });
+
+  it("shows an immediate '…' placeholder before the fetch resolves", async () => {
+    let resolve;
+    fetchDefinitionMock.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    render(<WordList found={["tribe"]} />);
+    await userEvent.setup().click(screen.getByText("tribe"));
+    const dialog = await screen.findByRole("dialog", {
+      name: /Definition of tribe/i,
+    });
+    expect(dialog).toHaveTextContent("…");
+    await act(async () => {
+      resolve("the definition");
+    });
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent("the definition"),
+    );
+  });
+
+  it("falls back to 'No definition available' when fetch returns null", async () => {
+    fetchDefinitionMock.mockResolvedValue(null);
+    render(<WordList found={["tribe"]} />);
+    await userEvent.setup().click(screen.getByText("tribe"));
+    expect(
+      await screen.findByText(/No definition available/i),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking the same word again dismisses the popover (toggle)", async () => {
+    fetchDefinitionMock.mockResolvedValue("definition");
+    render(<WordList found={["tribe"]} />);
+    await clickWord("tribe");
+    await screen.findByRole("dialog");
+    await clickWord("tribe");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("clicking the popover itself dismisses it", async () => {
+    fetchDefinitionMock.mockResolvedValue("definition");
+    render(<WordList found={["tribe"]} />);
+    await clickWord("tribe");
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.setup().click(dialog);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("clicking a different word swaps in its definition", async () => {
+    fetchDefinitionMock.mockImplementation(async (w) => `definition of ${w}`);
+    render(<WordList found={["tribe", "trident"]} />);
+    await clickWord("tribe");
+    await screen.findByText("definition of tribe");
+    await clickWord("trident");
+    await screen.findByRole("dialog", { name: /Definition of trident/i });
+    expect(screen.getByText("definition of trident")).toBeInTheDocument();
+    expect(screen.queryByText("definition of tribe")).not.toBeInTheDocument();
+  });
+
+  it("a stale racing fetch doesn't overwrite a newer click's popover", async () => {
+    // Click "tribe" — slow fetch. Click "trident" — fast. The "tribe"
+    // fetch resolves last; the trident popover stays.
+    let resolveTribe;
+    fetchDefinitionMock.mockImplementation((w) => {
+      if (w === "tribe") return new Promise((r) => (resolveTribe = r));
+      if (w === "trident") return Promise.resolve("trident def");
+      return Promise.resolve(null);
+    });
+    render(<WordList found={["tribe", "trident"]} />);
+    await clickWord("tribe");
+    await clickWord("trident");
+    await screen.findByText("trident def");
+    await act(async () => {
+      resolveTribe("late tribe def");
+    });
+    expect(screen.getByText("trident def")).toBeInTheDocument();
+    expect(screen.queryByText("late tribe def")).not.toBeInTheDocument();
+  });
+
+  it("auto-dismisses after the visible window", async () => {
+    // Fake timers must be installed BEFORE the click so the WordList's
+    // setTimeout for auto-dismiss is captured by the fake clock. The
+    // fetch promise resolves via microtasks, which run regardless.
+    vi.useFakeTimers();
+    try {
+      fetchDefinitionMock.mockResolvedValue("def");
+      render(<WordList found={["tribe"]} />);
+      fireEvent.click(screen.getByText("tribe"));
+      // Flush microtasks for the fetch resolution + state updates.
+      await act(async () => {});
+      expect(screen.queryByRole("dialog")).toBeInTheDocument();
+      await act(async () => {
+        vi.advanceTimersByTime(4900);
+      });
+      expect(screen.queryByRole("dialog")).toBeInTheDocument();
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("phone breakpoint: clicks are no-ops (no popover, no fetch)", async () => {
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    });
+    render(<WordList found={["tribe"]} />);
+    await clickWord("tribe");
+    expect(fetchDefinitionMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("renders sigil-wrapped definition fragments italicized", async () => {
+    fetchDefinitionMock.mockResolvedValue("a friend [n FRIENDS] {pal=n}");
+    render(<WordList found={["tribe"]} />);
+    await clickWord("tribe");
+    const dialog = await screen.findByRole("dialog");
+    const ems = dialog.querySelectorAll("em");
+    expect(Array.from(ems).map((e) => e.textContent)).toEqual([
+      "n FRIENDS",
+      "pal=n",
+    ]);
+    expect(dialog.textContent).toContain("[");
+    expect(dialog.textContent).toContain("]");
   });
 });
