@@ -5,7 +5,11 @@ import Feedback from "./Feedback";
 import WordList from "./WordList";
 import RankBar from "./RankBar";
 import Chat from "./Chat";
+import { Leaderboard, LeaveX, WinnerBanner } from "./Leaderboard";
 import useTimer from "./useTimer";
+import useRecentlyFound from "./useRecentlyFound";
+import useGlobalKeyHandler from "./useGlobalKeyHandler";
+import useGameStream from "./useGameStream";
 import { saveState } from "./storage";
 
 function shuffle(arr) {
@@ -89,7 +93,6 @@ export default function Game({
     ? { message: "Time's up!", type: "error" }
     : submitFeedback;
   const chatRef = useRef(null);
-  const keyHandlerRef = useRef(null);
   const lastWordRef = useRef("");
   const submitting = useRef(false);
   const togglingPause = useRef(false);
@@ -169,60 +172,12 @@ export default function Game({
     [game.letters, game.center],
   );
 
-  // Words that just arrived in `found` get a 5-second "recently added"
-  // underline in the WordList. `knownFoundRef` records what was already
-  // present so the *initial* render (or a reconnect with a populated
-  // `found` array) doesn't flash on every existing word.
-  //
-  // Timers live in a ref keyed by word — NOT in the effect's cleanup.
-  // The submitter's path triggers `setFound` twice in quick succession
-  // (immediate response from /submit, then the WS broadcast a tick
-  // later); a per-effect cleanup would cancel the just-scheduled timer
-  // when the second update fires, leaving the underline stuck on
-  // forever. Per-word timers are independent and fire reliably.
-  const [recentlyFound, setRecentlyFound] = useState(() => new Set());
-  const knownFoundRef = useRef(new Set(found));
-  const recentTimersRef = useRef(new Map());
-  useEffect(() => {
-    const known = knownFoundRef.current;
-    const fresh = found.filter((w) => !known.has(w));
-    if (fresh.length === 0) return;
-    knownFoundRef.current = new Set(found);
-    setRecentlyFound((cur) => {
-      const next = new Set(cur);
-      fresh.forEach((w) => next.add(w));
-      return next;
-    });
-    fresh.forEach((w) => {
-      const existing = recentTimersRef.current.get(w);
-      if (existing) clearTimeout(existing);
-      const id = setTimeout(() => {
-        recentTimersRef.current.delete(w);
-        setRecentlyFound((cur) => {
-          if (!cur.has(w)) return cur;
-          const next = new Set(cur);
-          next.delete(w);
-          return next;
-        });
-      }, 5000);
-      recentTimersRef.current.set(w, id);
-    });
-  }, [found]);
-
-  // Clear any pending recent-fade timers on unmount. (No per-effect
-  // cleanup above — see comment on the timers ref.)
-  useEffect(
-    () => () => {
-      recentTimersRef.current.forEach((id) => clearTimeout(id));
-      recentTimersRef.current.clear();
-    },
-    [],
-  );
+  const recentlyFound = useRecentlyFound(found);
 
   // Global keydown handler — captures letter/backspace/enter/tab so the
   // player never has to click a focused input first. Skips events that
   // originate from an input or textarea (e.g. the chat box).
-  keyHandlerRef.current = (e) => {
+  useGlobalKeyHandler((e) => {
     if (locked) return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -252,14 +207,7 @@ export default function Game({
     ) {
       setWord((w) => w + e.key.toUpperCase());
     }
-  };
-  useEffect(() => {
-    function handler(e) {
-      keyHandlerRef.current(e);
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  });
 
   // Server is authoritative for game state. Solo persists just the
   // gameId; multi persists {gameId, playerId} so a refresh of /g/<id>
@@ -274,30 +222,7 @@ export default function Game({
   // view } on every change and every HEARTBEAT_MS. Both carry a full
   // clientView; applyServerView keeps the UI in sync even with multiple
   // tabs hitting the same game.
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof WebSocket === "undefined") {
-      return;
-    }
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const qs = playerId
-      ? `?playerId=${encodeURIComponent(playerId)}`
-      : "";
-    const ws = new WebSocket(
-      `${proto}//${window.location.host}/ws/${game.gameId}${qs}`,
-    );
-    ws.addEventListener("message", (evt) => {
-      try {
-        const msg = JSON.parse(evt.data);
-        if (msg && msg.view) applyServerView(msg.view);
-      } catch {
-        // malformed message — ignore
-      }
-    });
-    return () => ws.close();
-    // applyServerView closes over current state setters; we only want
-    // to reopen the socket on gameId/playerId change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game.gameId, playerId]);
+  useGameStream(game.gameId, playerId, applyServerView);
 
   // Apply a server response that includes a clientView (pause/resume/end
   // returns). Submit responses don't include these fields and are handled
@@ -706,83 +631,3 @@ export default function Game({
   );
 }
 
-// Compete leaderboard — sorted by score desc, with each player's name,
-// score and word count. Post-end, each top-scoring player is tagged
-// "winner" — or "tied" when the top score is shared. The current
-// player gets a small × to leave the group instead of a "you" pill.
-function Leaderboard({ players, playerId, winnerId, ended, onLeave }) {
-  const sorted = [...players].sort((a, b) => b.score - a.score);
-  const topScore = sorted.length ? sorted[0].score : 0;
-  const sharedTop =
-    ended && sorted.filter((p) => p.score === topScore).length > 1;
-  return (
-    <ol className="Game-leaderboard" aria-label="Leaderboard">
-      {sorted.map((p) => {
-        const atTop = ended && p.score === topScore && topScore > 0;
-        return (
-          <li
-            key={p.playerId}
-            className={`Game-leaderboard-row${
-              p.online === false ? " is-offline" : ""
-            }${p.playerId === winnerId && !sharedTop ? " is-winner" : ""}`}
-            style={{ "--player-color": p.color }}
-          >
-            <span className="Game-roster-dot" aria-hidden="true" />
-            <span className="Game-leaderboard-id">
-              <span className="Game-leaderboard-name">{p.name}</span>
-              {p.playerId === playerId && onLeave && (
-                <LeaveX onClick={onLeave} />
-              )}
-            </span>
-            {atTop && sharedTop && (
-              <span className="Game-roster-tag Game-roster-tag-tied">
-                tied
-              </span>
-            )}
-            {atTop && !sharedTop && (
-              <span className="Game-roster-tag Game-roster-tag-winner">
-                winner
-              </span>
-            )}
-            <span className="Game-leaderboard-score">{p.score}</span>
-            <span className="Game-leaderboard-count">/ {p.foundCount}</span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-// Tiny "leave the group" affordance shown next to the current player's
-// row in rosters and leaderboards. Replaces both the standalone "Leave"
-// button (which read as a generic action when sat next to End game)
-// and the redundant "you" pill (the × is itself a self-locator).
-function LeaveX({ onClick }) {
-  return (
-    <button
-      type="button"
-      className="Roster-leave"
-      onClick={onClick}
-      title="Leave group"
-      aria-label="Leave group"
-    >
-      ×
-    </button>
-  );
-}
-
-function WinnerBanner({ players, winnerId }) {
-  const winner = players.find((p) => p.playerId === winnerId);
-  if (!winner) return null;
-  return (
-    <div className="Game-winner" role="status" aria-live="polite">
-      <span
-        className="Game-winner-name"
-        style={{ color: winner.color }}
-      >
-        {winner.name}
-      </span>{" "}
-      wins!
-    </div>
-  );
-}
