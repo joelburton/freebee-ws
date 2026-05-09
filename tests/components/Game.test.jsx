@@ -865,3 +865,33 @@ describe("Game: Reconnecting pill", () => {
     }
   });
 });
+
+describe("Game: share-link button", () => {
+  it("renders a 'Copy share link' button (subtle, on the hex grid)", () => {
+    setup();
+    expect(
+      screen.getByRole("button", { name: /Copy share link/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking copies a /share URL with letters/center/timer to the clipboard", async () => {
+    // userEvent.setup() installs a real-ish clipboard mock on
+    // navigator.clipboard for the test session — see the @testing-
+    // library/user-event clipboard docs. Set up the user *before*
+    // rendering so the mock is in place when the handler resolves
+    // navigator.clipboard?.writeText.
+    const user = userEvent.setup();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    setup({ timerMode: "down", countdownSeconds: 120 });
+    await user.click(
+      screen.getByRole("button", { name: /Copy share link/i }),
+    );
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const url = new URL(writeText.mock.calls[0][0]);
+    expect(url.pathname).toBe("/share");
+    expect(url.searchParams.get("letters")).toBe("bdeint");
+    expect(url.searchParams.get("center")).toBe("r");
+    expect(url.searchParams.get("timerMode")).toBe("down");
+    expect(url.searchParams.get("countdownSeconds")).toBe("120");
+  });
+});

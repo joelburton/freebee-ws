@@ -9,12 +9,14 @@ import HomePage from "./pages/HomePage.jsx";
 import SoloPage from "./pages/SoloPage.jsx";
 import LobbyPage from "./pages/LobbyPage.jsx";
 import PlayPage from "./pages/PlayPage.jsx";
+import SharePage from "./pages/SharePage.jsx";
 
 const router = createBrowserRouter([
   { path: "/", element: <HomePage /> },
   { path: "/p/:gameId", element: <SoloPage /> },
   { path: "/g/:gameId", element: <LobbyPage /> },
   { path: "/g/:gameId/play", element: <PlayPage /> },
+  { path: "/share", element: <SharePage /> },
 ]);
 
 createRoot(document.getElementById("root")).render(

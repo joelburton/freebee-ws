@@ -442,11 +442,19 @@ export default function Game({
             </div>
             <Feedback message={feedback.message} type={feedback.type} />
           </div>
-          <Letters
-            letters={outerLetters}
-            center={game.center.toUpperCase()}
-            onLetterClick={handleLetterClick}
-          />
+          <div className="Game-letters-wrap">
+            <Letters
+              letters={outerLetters}
+              center={game.center.toUpperCase()}
+              onLetterClick={handleLetterClick}
+            />
+            <ShareLink
+              letters={game.letters}
+              center={game.center}
+              timerMode={timerMode}
+              countdownSeconds={countdownSeconds}
+            />
+          </div>
           <div className="Actions">
             <button
               type="button"
@@ -671,3 +679,93 @@ export default function Game({
   );
 }
 
+// "Capture this puzzle" affordance: a small chain-link icon at the SE
+// of the hex grid. Click copies a /share URL to the clipboard so the
+// player can send it to a friend; the friend gets a fresh solo session
+// with the same letters and timer config.
+function ShareLink({ letters, center, timerMode, countdownSeconds }) {
+  const [copied, setCopied] = useState(false);
+
+  function buildUrl() {
+    const params = new URLSearchParams({
+      letters: letters.toLowerCase(),
+      center: center.toLowerCase(),
+      timerMode,
+      countdownSeconds: String(countdownSeconds),
+    });
+    return `${window.location.origin}/share?${params}`;
+  }
+
+  function handleClick() {
+    const url = buildUrl();
+    const flash = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    };
+    // Modern API only works in secure contexts. Fall back to execCommand
+    // (works on plain HTTP / LAN dev) — matches LobbyPage's copy logic.
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        flash();
+      } catch {
+        // Last resort: show nothing; the click was a no-op.
+      }
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(flash, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="Game-share"
+      onClick={handleClick}
+      title={copied ? "Link copied!" : "Copy share link"}
+      aria-label="Copy share link"
+    >
+      {copied ? (
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path
+            d="M5 12l5 5L20 7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path
+            d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </button>
+  );
+}
