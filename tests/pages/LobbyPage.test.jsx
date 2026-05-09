@@ -42,22 +42,10 @@ FakeWebSocket.instances = [];
 const baseLobby = {
   gameId: "g1",
   mode: "multi",
-  state: "lobby",
+  state: "assembling",
   hostId: "host-1",
   players: [{ playerId: "host-1", name: "Joel", color: "#1976d2" }],
-  letters: "bdeint",
-  center: "r",
-  words: 4,
-  total: 50,
-  found: [],
-  bonusFound: [],
-  foundBy: {},
-  score: 0,
   ended: false,
-  paused: true,
-  elapsed: 0,
-  timerMode: "up",
-  countdownSeconds: 0,
 };
 
 function mockFetch(handlers) {
@@ -186,75 +174,7 @@ describe("LobbyPage", () => {
     expect(screen.queryByRole("heading", { name: "Join group" })).toBeNull();
   });
 
-  it("shows the host's Start button only to the host", async () => {
-    const lobbyWithBuddy = {
-      ...baseLobby,
-      players: [
-        ...baseLobby.players,
-        { playerId: "buddy-1", name: "Buddy", color: "#e64a19" },
-      ],
-    };
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ gameId: "g1", playerId: "buddy-1" }),
-    );
-    mockFetch([
-      [
-        (url) => url === "/api/games/g1",
-        async () => ({ ok: true, json: async () => lobbyWithBuddy }),
-      ],
-    ]);
-    renderAt("g1");
-    await screen.findByRole("heading", { name: "Lobby" });
-    expect(
-      screen.queryByRole("button", { name: /Start game/i }),
-    ).toBeNull();
-    expect(screen.getByText(/Waiting for Joel to start/)).toBeInTheDocument();
-  });
-
-  it("host clicking Start posts /start and navigates to /play", async () => {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ gameId: "g1", playerId: "host-1" }),
-    );
-    // Start is gated on at least one friend having joined — give the
-    // host a buddy so the button isn't disabled.
-    const lobbyWithBuddy = {
-      ...baseLobby,
-      players: [
-        ...baseLobby.players,
-        { playerId: "buddy-1", name: "Buddy", color: "#e64a19" },
-      ],
-    };
-    const active = {
-      ...lobbyWithBuddy,
-      state: "active",
-      paused: false,
-      elapsed: 0,
-    };
-    mockFetch([
-      [
-        (url, opts) =>
-          url === "/api/games/g1" && (!opts || opts.method !== "POST"),
-        async () => ({ ok: true, json: async () => lobbyWithBuddy }),
-      ],
-      [
-        (url, opts) =>
-          url === "/api/games/g1/start" && opts?.method === "POST",
-        async () => ({ ok: true, json: async () => active }),
-      ],
-    ]);
-    const user = userEvent.setup();
-    renderAt("g1");
-    await user.click(
-      await screen.findByRole("button", { name: /Start game/i }),
-    );
-    await waitFor(() =>
-      expect(navigateMock).toHaveBeenCalledWith("/g/g1/play"),
-    );
-  });
-
-  it("host alone in the lobby: Start is disabled with a 'share link' hint", async () => {
+  it("solo lobby (alone) shows 'waiting for friends' hint with Start setup enabled", async () => {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ gameId: "g1", playerId: "host-1" }),
@@ -266,14 +186,14 @@ describe("LobbyPage", () => {
       ],
     ]);
     renderAt("g1");
-    const btn = await screen.findByRole("button", { name: /Start game/i });
-    expect(btn).toBeDisabled();
+    const btn = await screen.findByRole("button", { name: /Start setup/i });
+    expect(btn).toBeEnabled();
     expect(
       screen.getByText(/Waiting for friends to join/i),
     ).toBeInTheDocument();
   });
 
-  it("once a friend has joined, Start is enabled with a 'start when everyone arrived' hint", async () => {
+  it("once a friend has joined, the hint switches to 'pick game options'", async () => {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ gameId: "g1", playerId: "host-1" }),
@@ -292,10 +212,9 @@ describe("LobbyPage", () => {
       ],
     ]);
     renderAt("g1");
-    const btn = await screen.findByRole("button", { name: /Start game/i });
-    expect(btn).toBeEnabled();
+    await screen.findByRole("button", { name: /Start setup/i });
     expect(
-      screen.getByText(/Start the game once everyone/i),
+      screen.getByText(/pick game options for everyone/i),
     ).toBeInTheDocument();
   });
 

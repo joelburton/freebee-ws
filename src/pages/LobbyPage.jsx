@@ -152,20 +152,6 @@ export default function LobbyPage() {
     }
   }
 
-  // Legacy single-step start (for sessions that still spin up via the
-  // old /api/games path with a session-level lobby state).
-  async function handleStart() {
-    setBusy(true);
-    setActionError("");
-    try {
-      await postJson(`/api/games/${gameId}/start`, { playerId });
-      navigate(`/g/${gameId}/play`);
-    } catch (e) {
-      setActionError(e.message);
-      setBusy(false);
-    }
-  }
-
   function handleCopyLink() {
     const url = window.location.href;
     const flash = (msg) => {
@@ -281,14 +267,12 @@ export default function LobbyPage() {
     );
   }
 
-  const isHost = game.hostId === playerId;
   const configuring = game.configuring;
   const isConfigurator = configuring && configuring.ownerId === playerId;
   const configuringName = configuring
     ? game.players.find((p) => p.playerId === configuring.ownerId)?.name ||
       "Someone"
     : null;
-  const isLegacyLobby = game.state === "lobby"; // session-level lobby
 
   return (
     <div className="App-start">
@@ -365,56 +349,25 @@ export default function LobbyPage() {
             >
               {copyMsg || "Copy share link"}
             </button>
-            {isLegacyLobby ? (
-              isHost ? (
-                <>
-                  <button
-                    type="button"
-                    className="App-start-go"
-                    onClick={handleStart}
-                    disabled={busy || game.players.length < 2}
-                  >
-                    Start game
-                  </button>
-                  <p className="App-multi-waiting">
-                    {game.players.length < 2
-                      ? "Waiting for friends to join — share the link above."
-                      : "Start the game once everyone you invited has arrived."}
-                  </p>
-                </>
-              ) : (
-                <p className="App-multi-waiting">
-                  Waiting for {hostName(game)} to start…
-                </p>
-              )
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="App-start-go"
-                  onClick={handleStartSetup}
-                  disabled={busy}
-                >
-                  Start setup
-                </button>
-                <p className="App-multi-waiting">
-                  {game.players.length < 2
-                    ? "Waiting for friends to join — share the link above."
-                    : "Click to pick game options for everyone."}
-                </p>
-              </>
-            )}
+            <button
+              type="button"
+              className="App-start-go"
+              onClick={handleStartSetup}
+              disabled={busy}
+            >
+              Start setup
+            </button>
+            <p className="App-multi-waiting">
+              {game.players.length < 2
+                ? "Waiting for friends to join — share the link above."
+                : "Click to pick game options for everyone."}
+            </p>
           </>
         )}
         {actionError && <p className="App-start-error">{actionError}</p>}
       </section>
     </div>
   );
-}
-
-function hostName(game) {
-  const host = game.players.find((p) => p.playerId === game.hostId);
-  return host ? host.name : "the host";
 }
 
 // Default form state. Used as the initial draft for owners and as a

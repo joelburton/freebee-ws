@@ -3,14 +3,11 @@ import {
   createCustomSession,
   createEmptyGroup,
   getSession,
-  getGroup,
   getGroupForId,
   getMember,
-  isHost,
   isMultiplayer,
   addPlayer,
   removePlayer,
-  startSession,
   pauseSession,
   resumeSession,
   endSession,
@@ -43,37 +40,17 @@ function withSession(c) {
 }
 
 export function registerApiRoutes(app) {
-  // POST /api/games — create solo, co-op (multi), or compete.
-  // Inferred mode: playerName present + no explicit mode → "multi".
-  // Explicit modes: "solo", "multi", "compete". For "compete", an
-  // optional `targetRank` (index into RANKS) sets the first-to-rank
-  // end condition.
+  // POST /api/games — create a solo game (random or custom letters).
+  // Multiplayer creation lives on POST /api/groups + the configure flow.
   app.post("/api/games", async (c) => {
     const body = await safeJson(c);
-    const {
-      letters,
-      center,
-      timerMode,
-      countdownSeconds,
-      playerName,
-      mode,
-      targetRank,
-    } = body;
-    const cleanName =
-      typeof playerName === "string" ? playerName.trim() : "";
-    const cleanMode =
-      mode === "solo" || mode === "multi" || mode === "compete"
-        ? mode
-        : undefined;
+    const { letters, center, timerMode, countdownSeconds } = body;
     const opts = {
       timerMode:
         timerMode === "down" || timerMode === "none" ? timerMode : "up",
       countdownSeconds: Number.isFinite(countdownSeconds)
         ? Math.max(0, Math.floor(countdownSeconds))
         : 0,
-      ...(cleanName ? { playerName: cleanName } : {}),
-      ...(cleanMode ? { mode: cleanMode } : {}),
-      ...(Number.isInteger(targetRank) ? { targetRank } : {}),
     };
 
     let session;
@@ -84,11 +61,7 @@ export function registerApiRoutes(app) {
       session = await createRandomSession(opts);
     }
 
-    const group = getGroup(session);
-    const hostId = group ? group.hostId : null;
-    const view = clientView(session, hostId);
-    if (group) view.playerId = hostId;
-    return c.json(view);
+    return c.json(clientView(session, null));
   });
 
   // GET /api/games/:id — current state. Auto-end check runs inside
@@ -281,25 +254,6 @@ export function registerApiRoutes(app) {
     const result = removePlayer(group, body.playerId);
     if (result.error) return c.json({ error: result.error }, 403);
     return c.json({ ok: true });
-  });
-
-  // POST /api/games/:id/start — multiplayer only, host only, body { playerId }
-  app.post("/api/games/:id/start", async (c) => {
-    const r = withSession(c);
-    if (r.error) return r.error;
-    const session = r.session;
-    if (!isMultiplayer(session)) {
-      return c.json({ error: "Not a multiplayer game" }, 400);
-    }
-    if (session.state !== "lobby") {
-      return c.json({ error: "Game already started" }, 409);
-    }
-    const body = await safeJson(c);
-    if (!isHost(session, body.playerId)) {
-      return c.json({ error: "Host only" }, 403);
-    }
-    startSession(session);
-    return c.json(clientView(session, body.playerId));
   });
 
   // POST /api/games/:id/chat — multi only, body { playerId, text }.

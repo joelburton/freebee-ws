@@ -194,20 +194,14 @@ function buildSession(board, opts, groupId) {
     targetRank,
   } = opts;
   const now = Date.now();
-  const isMulti = mode === "multi" || mode === "compete";
   const isCompete = mode === "compete";
-
-  // Multiplayer sessions start in "lobby" with paused=true. Solo starts
-  // active and unpaused — even with timerMode "none" the player should
-  // still be able to submit words.
-  const startPaused = isMulti;
-  const timerRunning = !startPaused && timerMode !== "none";
+  const timerRunning = timerMode !== "none";
 
   return {
     id: newId(), // internal id; URL id for multi is the group's
     groupId, // null for solo
     mode,
-    state: isMulti ? "lobby" : "active",
+    state: "active",
     foundBy: {}, // word → playerId (co-op attribution)
     letters: board.letters,
     center: board.center,
@@ -223,7 +217,7 @@ function buildSession(board, opts, groupId) {
     ended: false,
     timerMode,
     countdownSeconds,
-    paused: startPaused,
+    paused: false,
     startedAt: timerRunning ? now : null,
     accumulatedMs: 0,
     targetRank: isCompete ? (targetRank ?? null) : null,
@@ -347,11 +341,6 @@ export function getMember(session, playerId) {
   return group.players.find((p) => p.playerId === playerId) || null;
 }
 
-export function isHost(session, playerId) {
-  const group = getGroup(session);
-  return !!(group && group.hostId === playerId);
-}
-
 // --- Creation ---
 
 export async function createRandomSession(opts = {}) {
@@ -370,50 +359,11 @@ export async function createCustomSession({ letters, center, ...opts }) {
   return createSession(opts, () => board, data);
 }
 
-// Internal: shared path for random + custom. Builds the session, and if
-// it's multiplayer, builds the surrounding group (host = the creator).
-function createSession(rawOpts, makeBoard, data) {
-  const { playerName, ...rest } = rawOpts;
-  const cleanName =
-    typeof playerName === "string" && playerName.trim()
-      ? playerName.trim()
-      : null;
-  const requestedMode = rest.mode;
-  // Mode inference: explicit `mode` wins; otherwise playerName presence
-  // implies "multi".
-  const mode =
-    requestedMode === "solo" ||
-    requestedMode === "multi" ||
-    requestedMode === "compete"
-      ? requestedMode
-      : cleanName
-        ? "multi"
-        : "solo";
-  const isMulti = mode === "multi" || mode === "compete";
-
-  if (isMulti) {
-    if (!cleanName) return { error: "Player name required for multiplayer" };
-    const host = makePlayer(cleanName, PLAYER_COLORS[0]);
-    const id = pickUrlId(data);
-    const now = Date.now();
-    const group = {
-      id,
-      hostId: host.playerId,
-      players: [host],
-      messages: [], // persists across sessions in this group.
-      currentSessionId: null, // set below
-      createdAt: now,
-      lastActiveAt: now,
-    };
-    GROUPS.set(id, group);
-    const session = buildSession(makeBoard(), { ...rest, mode }, id);
-    STORE.set(session.id, session);
-    group.currentSessionId = session.id;
-    return session;
-  }
-
-  // Solo: URL id = session id. pickUrlId checks both maps for collisions.
-  const session = buildSession(makeBoard(), { ...rest, mode: "solo" }, null);
+// Internal: shared path for random + custom solo creation. Multiplayer
+// sessions are cut by `commitConfiguration` from a group built via
+// `createEmptyGroup`, not by this helper.
+function createSession(opts, makeBoard, data) {
+  const session = buildSession(makeBoard(), { ...opts, mode: "solo" }, null);
   const id = pickUrlId(data);
   session.id = id;
   STORE.set(id, session);
@@ -458,8 +408,8 @@ function configureGuard(group, playerId) {
 }
 
 // True when the group is in a state where a new game can be configured:
-// no session yet, or the current session has ended. An active or lobby
-// session blocks configure (the configurator would stomp it).
+// no session yet, or the current session has ended. An active session
+// blocks configure (the configurator would stomp it).
 function canConfigure(group) {
   if (!group.currentSessionId) return true;
   const s = STORE.get(group.currentSessionId);
@@ -533,8 +483,6 @@ export async function commitConfiguration(group, playerId, opts) {
   } else {
     board = makeGame(data);
   }
-  // Sessions created via configure go straight to active (no session
-  // lobby — the group already served as the assembly room).
   const sessionOpts = {
     timerMode: rest.timerMode === "down" || rest.timerMode === "none"
       ? rest.timerMode
@@ -546,10 +494,6 @@ export async function commitConfiguration(group, playerId, opts) {
     ...(Number.isInteger(rest.targetRank) ? { targetRank: rest.targetRank } : {}),
   };
   const session = buildSession(board, sessionOpts, group.id);
-  // Skip the session-lobby state — go straight to active.
-  session.state = "active";
-  session.paused = false;
-  session.startedAt = sessionOpts.timerMode !== "none" ? Date.now() : null;
   STORE.set(session.id, session);
   group.currentSessionId = session.id;
   group.configuring = null;
@@ -563,8 +507,8 @@ export async function commitConfiguration(group, playerId, opts) {
 
 // Add a player to a multiplayer group. Allowed when the group has no
 // active game in progress: either no session yet, or the current
-// session is in lobby/ended state. Once a game is "active", the
-// roster is locked until it ends.
+// session has ended. Once a game is "active", the roster is locked
+// until it ends.
 export function addPlayer(group, name) {
   if (!group) return { error: "Group not found" };
   if (group.currentSessionId) {
@@ -810,17 +754,6 @@ export async function newBoardFromSession(oldSession) {
   return session;
 }
 
-export function startSession(session) {
-  if (!isMultiplayer(session)) return session;
-  if (session.state !== "lobby") return session;
-  session.state = "active";
-  session.paused = false;
-  session.startedAt = session.timerMode !== "none" ? Date.now() : null;
-  touch(session);
-  broadcast(session);
-  return session;
-}
-
 export function pauseSession(session) {
   if (session.ended || session.paused) return session;
   snapshotElapsed(session);
@@ -834,7 +767,6 @@ export function resumeSession(session) {
   if (session.ended) return session;
   if (!session.paused) return session;
   if (session.timerMode === "none") return session;
-  if (isMultiplayer(session) && session.state !== "active") return session;
   session.paused = false;
   session.startedAt = Date.now();
   touch(session);

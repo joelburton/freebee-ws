@@ -29,9 +29,8 @@ export default function PlayPage() {
         navigate(`/p/${gameId}`, { replace: true });
         return;
       }
-      // Lobby / assembling / configuring all live on the lobby route.
+      // assembling / configuring (no active session) live on the lobby route.
       if (
-        data.state === "lobby" ||
         data.state === "assembling" ||
         data.state === "configuring" ||
         data.configuring

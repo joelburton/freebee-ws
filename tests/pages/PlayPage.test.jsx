@@ -88,7 +88,7 @@ beforeEach(() => {
 });
 
 describe("PlayPage", () => {
-  it("redirects to /g/:id when state is still lobby", async () => {
+  it("redirects to /g/:id when the group has no active session yet", async () => {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ gameId: "g1", playerId: "host-1" }),
@@ -98,7 +98,7 @@ describe("PlayPage", () => {
         (url) => url === "/api/games/g1",
         async () => ({
           ok: true,
-          json: async () => ({ ...baseActive, state: "lobby" }),
+          json: async () => ({ ...baseActive, state: "assembling" }),
         }),
       ],
     ]);

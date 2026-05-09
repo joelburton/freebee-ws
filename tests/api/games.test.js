@@ -34,6 +34,61 @@ beforeEach(() => {
   _resetStore();
 });
 
+// Drives the Phase-2 group + configure path: create empty group, join a
+// buddy, claim configure, commit. Returns the active-session view fields
+// most tests need. Pass `solo: false` and tweak letters/center/mode/etc.
+// for compete or down-timer flavors.
+async function setupConfiguredGame({
+  letters,
+  center,
+  mode = "multi",
+  timerMode = "up",
+  countdownSeconds,
+  targetRank,
+  hostName = "Host",
+  buddyName = "Buddy",
+} = {}) {
+  const create = await app.fetch(
+    jsonReq("http://localhost/api/groups", { playerName: hostName }),
+  );
+  const host = await create.json();
+  const join = await app.fetch(
+    jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
+      playerName: buddyName,
+    }),
+  );
+  const buddy = await join.json();
+  await app.fetch(
+    jsonReq(`http://localhost/api/games/${host.gameId}/configure`, {
+      playerId: host.playerId,
+    }),
+  );
+  const commitBody = { playerId: host.playerId, mode, timerMode };
+  if (countdownSeconds !== undefined) commitBody.countdownSeconds = countdownSeconds;
+  if (targetRank !== undefined) commitBody.targetRank = targetRank;
+  if (letters !== undefined) commitBody.letters = letters;
+  if (center !== undefined) commitBody.center = center;
+  const commit = await app.fetch(
+    jsonReq(
+      `http://localhost/api/games/${host.gameId}/configure/commit`,
+      commitBody,
+    ),
+  );
+  const view = await commit.json();
+  const hostColor = view.players?.find((p) => p.playerId === host.playerId)
+    ?.color;
+  const buddyColor = view.players?.find((p) => p.playerId === buddy.playerId)
+    ?.color;
+  return {
+    gameId: host.gameId,
+    hostId: host.playerId,
+    buddyId: buddy.playerId,
+    hostColor,
+    buddyColor,
+    view,
+  };
+}
+
 describe("POST /api/games (create)", () => {
   it("creates a random game and returns a client-safe view", async () => {
     const res = await app.fetch(jsonReq("http://localhost/api/games", {}));
@@ -411,21 +466,11 @@ describe("Server-authoritative timer", () => {
     expect(data.paused).toBe(false);
   });
 
-  it("multi started with timerMode='none' transitions active and unpaused", async () => {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Joel",
-        timerMode: "none",
-      }),
-    );
-    const { gameId, playerId } = await create.json();
-    const res = await app.fetch(
-      jsonReq(`http://localhost/api/games/${gameId}/start`, { playerId }),
-    );
-    const data = await res.json();
-    expect(data.state).toBe("active");
-    expect(data.paused).toBe(false);
-    expect(data.elapsed).toBe(0);
+  it("multi started with timerMode='none' is active and unpaused", async () => {
+    const { view } = await setupConfiguredGame({ timerMode: "none" });
+    expect(view.state).toBe("active");
+    expect(view.paused).toBe(false);
+    expect(view.elapsed).toBe(0);
   });
 });
 
@@ -550,33 +595,16 @@ describe("Session TTL / GC", () => {
   });
 });
 
-describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url, body) {
-    return jsonReq(url, body);
-  }
-
-  async function createMulti(extra = {}) {
+describe("Multiplayer: group creation and join", () => {
+  async function emptyGroup() {
     const res = await app.fetch(
-      pjson("http://localhost/api/games", { playerName: "Joel", ...extra }),
+      jsonReq("http://localhost/api/groups", { playerName: "Joel" }),
     );
     return res.json();
   }
 
-  it("creates a multi game with mode='multi', state='lobby', host as first player", async () => {
-    const data = await createMulti();
-    expect(data.mode).toBe("multi");
-    expect(data.state).toBe("lobby");
-    expect(data.players).toHaveLength(1);
-    expect(data.players[0].name).toBe("Joel");
-    expect(data.players[0].color).toMatch(/^#[0-9a-f]{6}$/i);
-    expect(data.hostId).toBe(data.players[0].playerId);
-    expect(data.playerId).toBe(data.hostId);
-    // Multi lobby starts paused; the timer hasn't begun.
-    expect(data.paused).toBe(true);
-    expect(data.elapsed).toBe(0);
-  });
-
   it("solo create returns no playerId / players / hostId", async () => {
-    const res = await app.fetch(pjson("http://localhost/api/games", {}));
+    const res = await app.fetch(jsonReq("http://localhost/api/games", {}));
     const data = await res.json();
     expect(data.mode).toBe("solo");
     expect(data.state).toBe("active");
@@ -586,9 +614,9 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
   });
 
   it("join adds a player with a distinct color and returns its playerId", async () => {
-    const { gameId } = await createMulti();
+    const { gameId } = await emptyGroup();
     const res = await app.fetch(
-      pjson(`http://localhost/api/games/${gameId}/join`, {
+      jsonReq(`http://localhost/api/games/${gameId}/join`, {
         playerName: "Alice",
       }),
     );
@@ -602,14 +630,14 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
   });
 
   it("join allows duplicate names (distinguished by color)", async () => {
-    const { gameId } = await createMulti();
+    const { gameId } = await emptyGroup();
     await app.fetch(
-      pjson(`http://localhost/api/games/${gameId}/join`, {
+      jsonReq(`http://localhost/api/games/${gameId}/join`, {
         playerName: "Joel",
       }),
     );
     const res = await app.fetch(
-      pjson(`http://localhost/api/games/${gameId}/join`, {
+      jsonReq(`http://localhost/api/games/${gameId}/join`, {
         playerName: "Joel",
       }),
     );
@@ -619,9 +647,9 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
   });
 
   it("join refuses an empty name", async () => {
-    const { gameId } = await createMulti();
+    const { gameId } = await emptyGroup();
     const res = await app.fetch(
-      pjson(`http://localhost/api/games/${gameId}/join`, { playerName: "" }),
+      jsonReq(`http://localhost/api/games/${gameId}/join`, { playerName: "" }),
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/required/i);
@@ -630,10 +658,10 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
   it("join refuses on a solo game", async () => {
     // Solo games have no group, so join can't find one — same effect
     // as "not multiplayer" but expressed as 404.
-    const create = await app.fetch(pjson("http://localhost/api/games", {}));
+    const create = await app.fetch(jsonReq("http://localhost/api/games", {}));
     const { gameId } = await create.json();
     const res = await app.fetch(
-      pjson(`http://localhost/api/games/${gameId}/join`, {
+      jsonReq(`http://localhost/api/games/${gameId}/join`, {
         playerName: "Alice",
       }),
     );
@@ -641,101 +669,20 @@ describe("Multiplayer: lobby creation, join, start", () => {  function pjson(url
   });
 
   it("join refuses after the game has started", async () => {
-    const created = await createMulti();
-    await app.fetch(
-      pjson(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: created.playerId,
-      }),
-    );
+    const { gameId } = await setupConfiguredGame();
     const res = await app.fetch(
-      pjson(`http://localhost/api/games/${created.gameId}/join`, {
+      jsonReq(`http://localhost/api/games/${gameId}/join`, {
         playerName: "Late",
       }),
     );
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/already started/i);
   });
-
-  it("start: host transitions lobby → active and begins the timer", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    try {
-      const created = await createMulti();
-      const res = await app.fetch(
-        pjson(`http://localhost/api/games/${created.gameId}/start`, {
-          playerId: created.playerId,
-        }),
-      );
-      expect(res.status).toBe(200);
-      const data = await res.json();
-      expect(data.state).toBe("active");
-      expect(data.paused).toBe(false);
-      vi.advanceTimersByTime(3000);
-      const after = await (
-        await app.fetch(
-          new Request(`http://localhost/api/games/${created.gameId}`),
-        )
-      ).json();
-      expect(after.elapsed).toBe(3);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("start: 403 for non-host", async () => {
-    const created = await createMulti();
-    const join = await app.fetch(
-      pjson(`http://localhost/api/games/${created.gameId}/join`, {
-        playerName: "Alice",
-      }),
-    );
-    const aliceId = (await join.json()).playerId;
-    const res = await app.fetch(
-      pjson(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: aliceId,
-      }),
-    );
-    expect(res.status).toBe(403);
-  });
-
-  it("start: 409 when already started", async () => {
-    const created = await createMulti();
-    await app.fetch(
-      pjson(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: created.playerId,
-      }),
-    );
-    const res = await app.fetch(
-      pjson(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: created.playerId,
-      }),
-    );
-    expect(res.status).toBe(409);
-  });
 });
 
 describe("Multiplayer: in-game actions require membership", () => {
-  async function startedMulti(letters = "bdeint", center = "r") {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        letters,
-        center,
-      }),
-    );
-    const created = await create.json();
-    const join = await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/join`, {
-        playerName: "Buddy",
-      }),
-    );
-    const buddyId = (await join.json()).playerId;
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: created.playerId,
-      }),
-    );
-    return { gameId: created.gameId, hostId: created.playerId, buddyId };
+  function startedMulti() {
+    return setupConfiguredGame({ letters: "bdeint", center: "r" });
   }
 
   it("submit: 403 if playerId not in roster", async () => {
@@ -747,24 +694,6 @@ describe("Multiplayer: in-game actions require membership", () => {
       }),
     );
     expect(res.status).toBe(403);
-  });
-
-  it("submit: 409 while game is still in lobby", async () => {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        letters: "bdeint",
-        center: "r",
-      }),
-    );
-    const { gameId, playerId } = await create.json();
-    const res = await app.fetch(
-      jsonReq(`http://localhost/api/games/${gameId}/submit`, {
-        word: "tribe",
-        playerId,
-      }),
-    );
-    expect(res.status).toBe(409);
   });
 
   it("submit attributes the find via foundBy", async () => {
@@ -824,36 +753,13 @@ describe("Multiplayer: in-game actions require membership", () => {
 });
 
 describe("Multiplayer presence", () => {
-  async function startedMulti() {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        letters: "bdeint",
-        center: "r",
-      }),
-    );
-    const created = await create.json();
-    const join = await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/join`, {
-        playerName: "Buddy",
-      }),
-    );
-    const buddy = await join.json();
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: created.playerId,
-      }),
-    );
-    return {
-      gameId: created.gameId,
-      hostId: created.playerId,
-      buddyId: buddy.playerId,
-    };
+  function startedMulti() {
+    return setupConfiguredGame({ letters: "bdeint", center: "r" });
   }
 
   it("clientView reports online=false for joined-but-not-yet-connected players", async () => {
     const create = await app.fetch(
-      jsonReq("http://localhost/api/games", { playerName: "Joel" }),
+      jsonReq("http://localhost/api/groups", { playerName: "Joel" }),
     );
     const data = await create.json();
     expect(data.players[0].online).toBe(false);
@@ -936,11 +842,10 @@ describe("Multiplayer presence", () => {
 describe("connection presence", () => {
   it("connecting with a member playerId marks online; disconnect marks offline", async () => {
     const create = await app.fetch(
-      jsonReq("http://localhost/api/games", { playerName: "Joel" }),
+      jsonReq("http://localhost/api/groups", { playerName: "Joel" }),
     );
     const { gameId, playerId } = await create.json();
-    const session = getSession(gameId);
-    const group = getGroup(session);
+    const group = getGroupForId(gameId);
     expect(group.players[0].connections).toBe(0);
 
     presenceConnect(group, playerId);
@@ -952,11 +857,10 @@ describe("connection presence", () => {
 
   it("anonymous (no playerId) connection does not affect presence", async () => {
     const create = await app.fetch(
-      jsonReq("http://localhost/api/games", { playerName: "Joel" }),
+      jsonReq("http://localhost/api/groups", { playerName: "Joel" }),
     );
     const { gameId } = await create.json();
-    const session = getSession(gameId);
-    const group = getGroup(session);
+    const group = getGroupForId(gameId);
     presenceConnect(group, null);
     expect(group.players[0].connections).toBe(0);
     presenceConnect(group, "not-a-member");
@@ -966,38 +870,16 @@ describe("connection presence", () => {
 
 describe("Multiplayer new-board", () => {
   async function buildEndedMulti() {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        timerMode: "down",
-        countdownSeconds: 90,
-      }),
-    );
-    const created = await create.json();
-    const join = await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/join`, {
-        playerName: "Buddy",
-      }),
-    );
-    const buddy = await join.json();
+    const setup = await setupConfiguredGame({
+      timerMode: "down",
+      countdownSeconds: 90,
+    });
     await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/start`, {
-        playerId: created.playerId,
+      jsonReq(`http://localhost/api/games/${setup.gameId}/end`, {
+        playerId: setup.hostId,
       }),
     );
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${created.gameId}/end`, {
-        playerId: created.playerId,
-      }),
-    );
-    return {
-      gameId: created.gameId,
-      hostId: created.playerId,
-      buddyId: buddy.playerId,
-      hostColor: created.players[0].color,
-      buddyColor: buddy.players.find((p) => p.playerId === buddy.playerId)
-        .color,
-    };
+    return setup;
   }
 
   function newBoard(gameId, playerId) {
@@ -1051,26 +933,15 @@ describe("Multiplayer new-board", () => {
   it("with timerMode 'none', successor is unpaused (not stuck blurred)", async () => {
     // A "none" game has no pause/resume button, so a paused successor
     // would be unrecoverable — see newBoardFromSession.
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        timerMode: "none",
-      }),
-    );
-    const host = await create.json();
+    const { gameId, hostId } = await setupConfiguredGame({ timerMode: "none" });
     await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/start`, {
-        playerId: host.playerId,
-      }),
-    );
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/end`, {
-        playerId: host.playerId,
+      jsonReq(`http://localhost/api/games/${gameId}/end`, {
+        playerId: hostId,
       }),
     );
     const res = await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/new-board`, {
-        playerId: host.playerId,
+      jsonReq(`http://localhost/api/games/${gameId}/new-board`, {
+        playerId: hostId,
       }),
     );
     const data = await res.json();
@@ -1121,7 +992,7 @@ describe("Multiplayer new-board", () => {
 describe("Multiplayer chat", () => {
   async function multi() {
     const create = await app.fetch(
-      jsonReq("http://localhost/api/games", { playerName: "Joel" }),
+      jsonReq("http://localhost/api/groups", { playerName: "Joel" }),
     );
     const data = await create.json();
     return { gameId: data.gameId, hostId: data.playerId };
@@ -1225,32 +1096,13 @@ describe("Compete mode", () => {
   // which words are valid (avoiding the random-seeded scoring list).
   // Letters "bdeint" + center "r" yields several words including
   // "tribe", "rebind", "trident", "interbred".
-  async function buildCompete() {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        mode: "compete",
-        letters: "bdeint",
-        center: "r",
-      }),
-    );
-    const host = await create.json();
-    const join = await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
-        playerName: "Buddy",
-      }),
-    );
-    const buddy = await join.json();
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/start`, {
-        playerId: host.playerId,
-      }),
-    );
-    return {
-      gameId: host.gameId,
-      hostId: host.playerId,
-      buddyId: buddy.playerId,
-    };
+  function buildCompete(extra = {}) {
+    return setupConfiguredGame({
+      mode: "compete",
+      letters: "bdeint",
+      center: "r",
+      ...extra,
+    });
   }
 
   function submit(gameId, playerId, word) {
@@ -1268,20 +1120,6 @@ describe("Compete mode", () => {
       new Request(`http://localhost/api/games/${gameId}${qs}`),
     );
   }
-
-  it("creates a compete session with mode='compete' and lobby state", async () => {
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        mode: "compete",
-      }),
-    );
-    expect(create.status).toBe(200);
-    const data = await create.json();
-    expect(data.mode).toBe("compete");
-    expect(data.state).toBe("lobby");
-    expect(data.playerId).toBe(data.hostId);
-  });
 
   it("each player has their own found list — submits don't leak across players", async () => {
     const { gameId, hostId, buddyId } = await buildCompete();
@@ -1338,30 +1176,11 @@ describe("Compete mode", () => {
   it("first-to-rank: any submit that crosses targetRank ends the game and sets winnerId", async () => {
     // targetRank: 0 ("Start") is satisfied by any positive score, so a
     // single submit triggers the end. The triggering player wins.
-    const create = await app.fetch(
-      jsonReq("http://localhost/api/games", {
-        playerName: "Host",
-        mode: "compete",
-        letters: "bdeint",
-        center: "r",
-        targetRank: 0,
-      }),
-    );
-    const host = await create.json();
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/join`, {
-        playerName: "Buddy",
-      }),
-    );
-    await app.fetch(
-      jsonReq(`http://localhost/api/games/${host.gameId}/start`, {
-        playerId: host.playerId,
-      }),
-    );
-    await submit(host.gameId, host.playerId, "tribe");
-    const view = await (await getView(host.gameId, host.playerId)).json();
+    const { gameId, hostId } = await buildCompete({ targetRank: 0 });
+    await submit(gameId, hostId, "tribe");
+    const view = await (await getView(gameId, hostId)).json();
     expect(view.ended).toBe(true);
-    expect(view.winnerId).toBe(host.playerId);
+    expect(view.winnerId).toBe(hostId);
   });
 
   it("post-end exposes missedByMe (others' finds the viewer didn't get)", async () => {
