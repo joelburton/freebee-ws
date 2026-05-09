@@ -51,6 +51,10 @@ const Chat = forwardRef(function Chat(
   const listEndRef = useRef(null);
 
   function openAndFocus() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
     setOpen(true);
     // Focus has to wait until the popover renders.
     setTimeout(() => inputRef.current?.focus(), 0);
