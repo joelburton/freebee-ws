@@ -79,7 +79,7 @@ export default function Game({
   });
   // `ended` reflects server-confirmed end. `displayEnded` covers the brief
   // window between the client's clock hitting 0 and the server confirming
-  // via /end's response or the SSE state event.
+  // via /end's response or a WebSocket state push.
   const displayEnded = ended || timeUp;
   const locked = paused || displayEnded;
   // The "Time's up" message is derived (no setState-in-effect cascading);
@@ -350,7 +350,7 @@ export default function Game({
   }
 
   // When the client's clock hits 0, ask the server to end the game.
-  // The /end response (or an SSE 'state' event) sets `ended` for us.
+  // The /end response (or a WebSocket state push) sets `ended` for us.
   useEffect(() => {
     if (!timeUp || ended) return;
     endGameOnServer();

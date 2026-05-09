@@ -196,7 +196,7 @@ const Chat = forwardRef(function Chat(
       )}
       <button
         type="button"
-        className={`Chat-button${unreadColor ? " has-unread" : ""}`}
+        className="Chat-button"
         onClick={() => (open ? setOpen(false) : openAndFocus())}
         style={
           unreadColor
@@ -249,7 +249,7 @@ const Chat = forwardRef(function Chat(
                 </li>
               );
             })}
-            <div ref={listEndRef} />
+            <li ref={listEndRef} aria-hidden="true" />
           </ul>
           <form className="Chat-form" onSubmit={handleSubmit}>
             <input

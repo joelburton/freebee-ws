@@ -82,7 +82,6 @@ export function registerApiRoutes(app) {
       if (session.error) return c.json({ error: session.error }, 400);
     } else {
       session = await createRandomSession(opts);
-      if (session.error) return c.json({ error: session.error }, 400);
     }
 
     const group = getGroup(session);

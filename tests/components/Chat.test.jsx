@@ -89,8 +89,8 @@ describe("Chat", () => {
     const messages = [{ playerId: "p-buddy", text: "yo", ts: 1 }];
     renderChat({ messages });
     const btn = screen.getByRole("button", { name: "Chat" });
-    expect(btn.classList.contains("has-unread")).toBe(true);
-    // jsdom normalizes hex to rgb in cssText.
+    // Unread is conveyed by the inline background/borderColor (sender's
+    // color). jsdom normalizes hex to rgb in cssText.
     expect(btn.style.cssText).toMatch(/rgb\(230, 74, 25\)/);
   });
 
@@ -102,16 +102,14 @@ describe("Chat", () => {
     const messages = [{ playerId: "p-buddy", text: "yo", ts: 1 }];
     const { unmount } = renderChat({ messages });
     await user.click(screen.getByRole("button", { name: "Chat" }));
-    expect(screen.getByRole("button", { name: "Chat" }).classList).not.toContain("has-unread");
+    expect(screen.getByRole("button", { name: "Chat" }).style.cssText).toBe("");
     unmount();
 
     // Re-mount with the same playerId + same backlog (carried over).
     renderChat({ messages });
     expect(
-      screen.getByRole("button", { name: "Chat" }).classList.contains(
-        "has-unread",
-      ),
-    ).toBe(false);
+      screen.getByRole("button", { name: "Chat" }).style.cssText,
+    ).toBe("");
   });
 
   it("a backlog containing only the viewer's own messages does NOT light up the button", () => {
@@ -121,7 +119,7 @@ describe("Chat", () => {
     const messages = [{ playerId: "p-host", text: "hi", ts: 1 }];
     renderChat({ messages });
     const btn = screen.getByRole("button", { name: "Chat" });
-    expect(btn.classList.contains("has-unread")).toBe(false);
+    expect(btn.style.cssText).toBe("");
   });
 
   it("opening the popover clears the unread state", async () => {
@@ -129,9 +127,8 @@ describe("Chat", () => {
     const messages = [{ playerId: "p-buddy", text: "yo", ts: 1 }];
     renderChat({ messages });
     const btn = screen.getByRole("button", { name: "Chat" });
-    expect(btn.classList.contains("has-unread")).toBe(true);
+    expect(btn.style.cssText).not.toBe("");
     await user.click(btn);
-    expect(btn.classList.contains("has-unread")).toBe(false);
     expect(btn.style.cssText).toBe("");
   });
 

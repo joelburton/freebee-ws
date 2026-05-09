@@ -144,7 +144,7 @@ export function processWords(legalText, scoringText = "") {
 // Builds a game payload for a chosen 7-letter set + center. Used by both the
 // random generator (after picking a pangram mask) and the custom-letters path.
 function buildGame(data, allowedMask, centerBit) {
-  const { words, masks, lengths, inScoring } = data;
+  const { words, masks, inScoring } = data;
   const wordlist = [];
   const revealList = [];
   let total = 0;
@@ -158,9 +158,7 @@ function buildGame(data, allowedMask, centerBit) {
 
     if (inScoring[i]) {
       revealList.push(words[i]);
-      const len = lengths[i];
-      total += len > 4 ? len : 1;
-      if (m === allowedMask) total += 10;
+      total += scoreWord(words[i]);
     }
   }
 
