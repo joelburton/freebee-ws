@@ -166,11 +166,11 @@ describe("Game · multiplayer awareness", () => {
     expect(trident.style.color).toBe("rgb(230, 74, 25)"); // #e64a19
   });
 
-  it("Tab opens the chat popover and focuses its input", async () => {
+  it("/ opens the chat popover and focuses its input", async () => {
     mockServer();
     const user = userEvent.setup();
     render(<Game game={multiGame} playerId="p-host" />);
-    await user.keyboard("{Tab}");
+    await user.keyboard("/");
     // Popover open, chat input focused.
     expect(screen.getByRole("dialog", { name: "Chat" })).toBeInTheDocument();
     await waitFor(() =>
