@@ -41,8 +41,8 @@ export default [
     },
   },
   {
-    // Server: Node-only, no React.
-    files: ["server/**/*.js"],
+    // Server + research scripts: Node-only, no React.
+    files: ["server/**/*.js", "scripts/**/*.js"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",

@@ -141,9 +141,10 @@ export function processWords(legalText, scoringText = "") {
   };
 }
 
-// Builds a game payload for a chosen 7-letter set + center. Used by both the
-// random generator (after picking a pangram mask) and the custom-letters path.
-function buildGame(data, allowedMask, centerBit) {
+// Builds a game payload for a chosen 7-letter set + center. Used by the
+// custom-letters path and by every BoardBuilder once they've decided on
+// a (allowedMask, centerBit) pair.
+export function buildGame(data, allowedMask, centerBit) {
   const { words, masks, inScoring } = data;
   const wordlist = [];
   const revealList = [];

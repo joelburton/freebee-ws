@@ -21,6 +21,7 @@ import {
   clientView,
   groupView,
 } from "./sessions.js";
+import { lettersToMask } from "./builders.js";
 import { lookupDefinition } from "./defs.js";
 
 async function safeJson(c) {
@@ -42,9 +43,12 @@ function withSession(c) {
 export function registerApiRoutes(app) {
   // POST /api/games — create a solo game (random or custom letters).
   // Multiplayer creation lives on POST /api/groups + the configure flow.
+  // Optional `previousLetters` (string of up to 7 chars, the prior solo
+  // game's letters + center) lets the BoardBuilder bias against repeats.
   app.post("/api/games", async (c) => {
     const body = await safeJson(c);
-    const { letters, center, timerMode, countdownSeconds } = body;
+    const { letters, center, timerMode, countdownSeconds, previousLetters } =
+      body;
     const opts = {
       timerMode:
         timerMode === "down" || timerMode === "none" ? timerMode : "up",
@@ -52,6 +56,9 @@ export function registerApiRoutes(app) {
         ? Math.max(0, Math.floor(countdownSeconds))
         : 0,
     };
+    if (typeof previousLetters === "string" && previousLetters.length > 0) {
+      opts.previousMask = lettersToMask(previousLetters, "");
+    }
 
     let session;
     if (letters !== undefined || center !== undefined) {

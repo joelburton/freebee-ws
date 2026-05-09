@@ -2,11 +2,11 @@ import { promises as fs } from "fs";
 import path from "path";
 import {
   processWords,
-  makeGame,
   makeCustomGame,
   validateCustomLetters,
   scoreWord,
 } from "./game.js";
+import { getActiveBuilder, lettersToMask } from "./builders.js";
 import { currentRankIndex } from "../shared/ranks.js";
 
 // ===========================================================================
@@ -344,8 +344,10 @@ export function getMember(session, playerId) {
 // --- Creation ---
 
 export async function createRandomSession(opts = {}) {
+  const { previousMask = null, ...rest } = opts;
   const data = await loadData();
-  return createSession(opts, () => makeGame(data), data);
+  const builder = getActiveBuilder(data);
+  return createSession(rest, () => builder.next({ previousMask }), data);
 }
 
 export async function createCustomSession({ letters, center, ...opts }) {
@@ -417,6 +419,16 @@ function canConfigure(group) {
   return s.ended;
 }
 
+// 7-letter mask of the group's most recent (now-ended) session, or
+// null if the group has never had a session. Fed to the BoardBuilder
+// so the new board can avoid sharing too many letters with the last.
+function previousMaskFromGroup(group) {
+  if (!group.currentSessionId) return null;
+  const s = STORE.get(group.currentSessionId);
+  if (!s) return null;
+  return lettersToMask(s.letters, s.center);
+}
+
 export function startConfiguring(group, playerId) {
   const err = configureGuard(group, playerId);
   if (err) return err;
@@ -481,7 +493,9 @@ export async function commitConfiguration(group, playerId, opts) {
       return { error: "No valid words for these letters" };
     }
   } else {
-    board = makeGame(data);
+    board = getActiveBuilder(data).next({
+      previousMask: previousMaskFromGroup(group),
+    });
   }
   const sessionOpts = {
     timerMode: rest.timerMode === "down" || rest.timerMode === "none"
@@ -715,7 +729,9 @@ export async function newBoardFromSession(oldSession) {
     return oldSession;
   }
   const data = await loadData();
-  const board = makeGame(data);
+  const board = getActiveBuilder(data).next({
+    previousMask: lettersToMask(oldSession.letters, oldSession.center),
+  });
   const now = Date.now();
   const session = {
     id: newId(),

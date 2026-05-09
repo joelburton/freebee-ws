@@ -34,11 +34,15 @@ export default function SoloPage() {
 
   async function handleNewBoard() {
     try {
-      // Carry over the previous game's timer config to avoid surprising
-      // the player with a different mode.
+      // Carry the previous game's timer config (so we don't surprise
+      // the player with a different mode) and its letters (so the
+      // BoardBuilder can avoid too much overlap with the last board).
       const data = await postJson("/api/games", {
         timerMode: game?.timerMode || "up",
         countdownSeconds: game?.countdownSeconds || 0,
+        ...(game?.letters && game?.center
+          ? { previousLetters: game.letters + game.center }
+          : {}),
       });
       navigate(`/p/${data.gameId}`, { replace: true });
     } catch (e) {

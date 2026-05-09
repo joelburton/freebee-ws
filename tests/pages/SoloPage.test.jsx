@@ -143,7 +143,13 @@ describe("SoloPage", () => {
     await screen.findByRole("button", { name: /New board/i });
     await user.click(screen.getByRole("button", { name: /New board/i }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]).toEqual({ timerMode: "down", countdownSeconds: 90 });
+    expect(calls[0]).toEqual({
+      timerMode: "down",
+      countdownSeconds: 90,
+      // The previous board's letters + center, so the BoardBuilder can
+      // bias against too-similar successors.
+      previousLetters: "bdeintr",
+    });
     expect(navigateMock).toHaveBeenCalledWith("/p/g2", { replace: true });
   });
 
