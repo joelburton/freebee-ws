@@ -50,33 +50,47 @@ const Chat = forwardRef(function Chat(
   const inputRef = useRef(null);
   const listEndRef = useRef(null);
 
+  // Brief preview popover shown above the chat button when a new
+  // (non-important) message arrives while the chat is closed. Cleared
+  // by a timer or by the chat being opened.
+  const [preview, setPreview] = useState(null);
+  const previewTimerRef = useRef(null);
+
+  function clearPreview() {
+    setPreview(null);
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+  }
+
+  function closeChat() {
+    setOpen(false);
+    // Snapshot read count for the unread badge once we're closed
+    // again, and persist so a new-board remount doesn't re-light up.
+    setLastReadCount(messages.length);
+    saveReadCount(playerId, messages.length);
+  }
+
   function openAndFocus() {
     if (open) {
-      setOpen(false);
+      closeChat();
       return;
     }
     setOpen(true);
+    clearPreview();
+    saveReadCount(playerId, messages.length);
     // Focus has to wait until the popover renders.
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
   useImperativeHandle(ref, () => ({ openAndFocus }));
 
-  // Mark all current messages read on open. Persisted so a new-board
-  // re-mount with the same player + carried-over backlog doesn't
-  // re-flag those messages as unread.
+  // While open, persist the running read count so a refresh doesn't
+  // re-flag already-seen messages as unread.
   useEffect(() => {
-    if (open) {
-      setLastReadCount(messages.length);
-      saveReadCount(playerId, messages.length);
-    }
+    if (open) saveReadCount(playerId, messages.length);
   }, [open, messages.length, playerId]);
-
-  // Brief preview popover shown above the chat button when a new
-  // (non-important) message arrives while the chat is closed. Cleared
-  // by a timer or by the chat being opened.
-  const [preview, setPreview] = useState(null);
-  const previewTimerRef = useRef(null);
 
   // React to new messages: important → auto-open, otherwise (if closed)
   // flash a preview. Track the previous count so we only react to *new*
@@ -92,6 +106,7 @@ const Chat = forwardRef(function Chat(
     const arrived = messages.slice(prev);
     if (arrived.some((m) => m.important)) {
       setOpen(true);
+      clearPreview();
       return;
     }
     if (open) return;
@@ -105,22 +120,10 @@ const Chat = forwardRef(function Chat(
     });
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => setPreview(null), 4000);
-    // `players` is intentionally excluded — we only want to flash a
-    // preview when the message list actually changes, not on roster
-    // re-renders that don't add a message.
+    // `players` and `clearPreview` are intentionally excluded — we
+    // only want to react to actual message-list growth.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
-
-  // Hide the preview when the chat opens (it's about to show the full
-  // message anyway), and clean up on unmount.
-  useEffect(() => {
-    if (!open) return;
-    setPreview(null);
-    if (previewTimerRef.current) {
-      clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = null;
-    }
-  }, [open]);
 
   useEffect(
     () => () => {
@@ -143,8 +146,10 @@ const Chat = forwardRef(function Chat(
   // they don't need to be alerted about them. Without this filter, a
   // refresh after sending a message lights up the chat button with the
   // viewer's own color until they click the bubble.
+  // While open, the running count is the read count: there's no unread.
+  const readCount = open ? messages.length : lastReadCount;
   const unreadFromOthers = messages
-    .slice(lastReadCount)
+    .slice(readCount)
     .filter((m) => m.playerId !== playerId);
   const unread = unreadFromOthers.length;
   const lastUnread = unreadFromOthers.at(-1);
@@ -178,9 +183,9 @@ const Chat = forwardRef(function Chat(
     if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
-      setOpen(false);
+      closeChat();
     } else if (e.key === "Escape") {
-      setOpen(false);
+      closeChat();
     }
   }
 
@@ -197,7 +202,7 @@ const Chat = forwardRef(function Chat(
       <button
         type="button"
         className="Chat-button"
-        onClick={() => (open ? setOpen(false) : openAndFocus())}
+        onClick={openAndFocus}
         style={
           unreadColor
             ? { background: unreadColor, borderColor: unreadColor }
@@ -222,7 +227,7 @@ const Chat = forwardRef(function Chat(
             <button
               type="button"
               className="Chat-close"
-              onClick={() => setOpen(false)}
+              onClick={closeChat}
               aria-label="Close chat"
             >
               ×
