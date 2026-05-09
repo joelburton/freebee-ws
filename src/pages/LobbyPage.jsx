@@ -197,7 +197,21 @@ export default function LobbyPage() {
   const siteHeader = (
     <header className="App-header">
       <h1>
-        <Link to="/">
+        {/* Title click: if the viewer has joined the group, exit it
+            cleanly first — handleLeave POSTs /leave, clears saved
+            state, then navigates home. Otherwise the Link's default
+            navigation runs. */}
+        <Link
+          to="/"
+          onClick={
+            playerId
+              ? (e) => {
+                  e.preventDefault();
+                  handleLeave();
+                }
+              : undefined
+          }
+        >
           <img src={beeLogo} className="BeeTitle-logo" alt="" aria-hidden="true" />
           Freebee
         </Link>

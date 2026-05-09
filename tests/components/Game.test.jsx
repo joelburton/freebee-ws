@@ -774,6 +774,35 @@ describe("Game interactions", () => {
   });
 });
 
+describe("Game: Freebee title click", () => {
+  it("solo: title is a Link to '/' (no onLeave wiring)", () => {
+    setup();
+    const link = screen.getByText("Freebee").closest("a");
+    expect(link).not.toBeNull();
+    expect(link.getAttribute("href")).toBe("/");
+  });
+
+  it("group mode: title click calls onLeave instead of navigating", async () => {
+    const onLeave = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <Game
+        game={{
+          ...mockGame,
+          mode: "multi",
+          players: [{ playerId: "p-host", name: "Host", color: "#1976d2" }],
+          messages: [],
+        }}
+        playerId="p-host"
+        onLeave={onLeave}
+      />,
+    );
+    const link = screen.getByText("Freebee").closest("a");
+    await user.click(link);
+    expect(onLeave).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("Game: Reconnecting pill", () => {
   it("does NOT show on initial mount before the first connection", () => {
     setup();

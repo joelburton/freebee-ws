@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import beeLogo from "../bee-logo.svg";
 import Letters from "./Letters";
 import Feedback from "./Feedback";
@@ -394,8 +395,24 @@ export default function Game({
       <div className="Game-board">
         <header className="Game-title">
           <h1>
-            <img src={beeLogo} className="BeeTitle-logo" alt="" aria-hidden="true" />
-            Freebee
+            {/* Title click: in solo, navigate home (Link's default).
+                In group mode (onLeave wired), exit the group cleanly
+                first — handleLeave POSTs /leave, clears saved state,
+                and then navigates home itself. */}
+            <Link
+              to="/"
+              onClick={
+                onLeave
+                  ? (e) => {
+                      e.preventDefault();
+                      onLeave();
+                    }
+                  : undefined
+              }
+            >
+              <img src={beeLogo} className="BeeTitle-logo" alt="" aria-hidden="true" />
+              Freebee
+            </Link>
           </h1>
         </header>
         <form

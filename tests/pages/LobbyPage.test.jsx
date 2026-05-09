@@ -379,6 +379,65 @@ describe("LobbyPage", () => {
       }),
     );
   });
+
+  it("Freebee title click while joined POSTs /leave and navigates home", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ gameId: "g1", playerId: "host-1" }),
+    );
+    const leaveCalls = [];
+    mockFetch([
+      [
+        (url, opts) =>
+          url === "/api/games/g1" && (!opts || opts.method !== "POST"),
+        async () => ({ ok: true, json: async () => baseLobby }),
+      ],
+      [
+        (url, opts) =>
+          url === "/api/games/g1/leave" && opts?.method === "POST",
+        async (url, opts) => {
+          leaveCalls.push(JSON.parse(opts.body));
+          return { ok: true, json: async () => ({ ok: true }) };
+        },
+      ],
+    ]);
+    renderAt("g1");
+    await screen.findByRole("heading", { name: "Lobby" });
+    await userEvent.setup().click(screen.getByText("Freebee"));
+    await waitFor(() =>
+      expect(leaveCalls).toEqual([{ playerId: "host-1" }]),
+    );
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith("/"),
+    );
+  });
+
+  it("Freebee title click while NOT joined just navigates home (no /leave)", async () => {
+    const leaveCalls = [];
+    mockFetch([
+      [
+        (url, opts) =>
+          url === "/api/games/g1" && (!opts || opts.method !== "POST"),
+        async () => ({ ok: true, json: async () => baseLobby }),
+      ],
+      [
+        (url, opts) =>
+          url === "/api/games/g1/leave" && opts?.method === "POST",
+        async (url, opts) => {
+          leaveCalls.push(JSON.parse(opts.body));
+          return { ok: true, json: async () => ({ ok: true }) };
+        },
+      ],
+    ]);
+    renderAt("g1");
+    await screen.findByRole("heading", { name: "Join group" });
+    // The Link's default '/' navigation handles this — handleLeave
+    // doesn't run, so no POST.
+    const link = screen.getByText("Freebee").closest("a");
+    expect(link.getAttribute("href")).toBe("/");
+    await userEvent.setup().click(link);
+    expect(leaveCalls).toEqual([]);
+  });
 });
 
 // Phase-2 in-group configure flow. Players take turns owning a setup
