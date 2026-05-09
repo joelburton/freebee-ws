@@ -222,7 +222,22 @@ export default function Game({
   // view } on every change and every HEARTBEAT_MS. Both carry a full
   // clientView; applyServerView keeps the UI in sync even with multiple
   // tabs hitting the same game.
-  useGameStream(game.gameId, playerId, applyServerView);
+  const streamStatus = useGameStream(game.gameId, playerId, applyServerView);
+
+  // Show a "Reconnecting…" pill, but not on quick blips: only after the
+  // reconnecting state has lasted ≥ 1s. Most reconnects resolve in well
+  // under a second, and a flickering pill on every blip would read as
+  // broken.
+  const [showReconnecting, setShowReconnecting] = useState(false);
+  useEffect(() => {
+    if (streamStatus !== "reconnecting") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowReconnecting(false);
+      return;
+    }
+    const id = setTimeout(() => setShowReconnecting(true), 1000);
+    return () => clearTimeout(id);
+  }, [streamStatus]);
 
   // Apply a server response that includes a clientView (pause/resume/end
   // returns). Submit responses don't include these fields and are handled
@@ -371,6 +386,11 @@ export default function Game({
 
   return (
     <div className="Game">
+      {showReconnecting && (
+        <div className="Game-reconnecting" role="status" aria-live="polite">
+          Reconnecting…
+        </div>
+      )}
       <div className="Game-board">
         <header className="Game-title">
           <h1>

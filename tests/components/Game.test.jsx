@@ -20,6 +20,7 @@ class FakeWebSocket {
     this.url = url;
     this.listeners = {};
     this.closed = false;
+    this.readyState = FakeWebSocket.OPEN;
     FakeWebSocket.instances.push(this);
   }
   addEventListener(type, fn) {
@@ -30,6 +31,8 @@ class FakeWebSocket {
   }
   close() {
     this.closed = true;
+    this.readyState = FakeWebSocket.CLOSED;
+    for (const fn of this.listeners.close || []) fn({});
   }
   // Test helper: dispatch a message from the "server". The wire shape is
   // { type: "state"|"heartbeat", view }.
@@ -38,7 +41,17 @@ class FakeWebSocket {
       fn({ data: JSON.stringify({ type: which, view }) });
     }
   }
+  fireOpen() {
+    for (const fn of this.listeners.open || []) fn({});
+  }
+  // Server-initiated close — like .close() but doesn't update closed.
+  fireClose() {
+    this.readyState = FakeWebSocket.CLOSED;
+    for (const fn of this.listeners.close || []) fn({});
+  }
 }
+FakeWebSocket.OPEN = 1;
+FakeWebSocket.CLOSED = 3;
 FakeWebSocket.instances = [];
 
 beforeEach(() => {
@@ -758,5 +771,68 @@ describe("Game interactions", () => {
       ),
     );
     await screen.findByRole("button", { name: "Pause" });
+  });
+});
+
+describe("Game: Reconnecting pill", () => {
+  it("does NOT show on initial mount before the first connection", () => {
+    setup();
+    expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+  });
+
+  it("does NOT show for a quick blip (under the 1s grace)", () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      const ws = FakeWebSocket.instances.at(-1);
+      act(() => ws.fireOpen());
+      act(() => ws.fireClose());
+      // Re-opens during the 1s grace.
+      act(() => vi.advanceTimersByTime(800));
+      expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+      const ws2 = FakeWebSocket.instances.at(-1);
+      act(() => ws2.fireOpen());
+      act(() => vi.advanceTimersByTime(2000));
+      expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows after the reconnecting state has lasted ≥ 1s", async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      const ws = FakeWebSocket.instances.at(-1);
+      act(() => ws.fireOpen());
+      act(() => ws.fireClose());
+      // Just before the grace expires: still hidden.
+      act(() => vi.advanceTimersByTime(900));
+      expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+      // Past the grace.
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.getByText(/Reconnecting/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disappears once we reconnect", () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      const ws = FakeWebSocket.instances.at(-1);
+      act(() => ws.fireOpen());
+      act(() => ws.fireClose());
+      act(() => vi.advanceTimersByTime(1500));
+      expect(screen.getByText(/Reconnecting/i)).toBeInTheDocument();
+      // Drive the backoff; new socket appears.
+      act(() => vi.advanceTimersByTime(2000));
+      const ws2 = FakeWebSocket.instances.at(-1);
+      act(() => ws2.fireOpen());
+      expect(screen.queryByText(/Reconnecting/i)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

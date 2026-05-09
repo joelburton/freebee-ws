@@ -639,6 +639,20 @@ code {
   gap: 20px;
 }
 
+.Game-reconnecting {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  background: var(--color-bg-elevated, #2a2a2a);
+  color: var(--color-text, #f5f5f5);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  z-index: 100;
+  opacity: 0.85;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
 @media (min-width: 760px) {
   /* Tablet: two-column layout, narrower side panel. */
   .Game {
