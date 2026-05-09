@@ -139,34 +139,40 @@ export function createDiverseBuilder(data) {
 
 // --- Registry ---------------------------------------------------------
 //
-// Future per-game configuration would pick a builder by name from here.
-// For now `ACTIVE` is the global default; tests and `_resetActiveBuilder`
-// can override it.
+// Per-game `builder` field selects from this map. Unknown / missing
+// names fall back to DEFAULT_BUILDER. Each named builder is constructed
+// once and cached for the process.
 
 export const BUILDERS = {
   default: createDefaultBuilder,
   diverse: createDiverseBuilder,
 };
 
-const ACTIVE = "diverse";
+export const DEFAULT_BUILDER = "diverse";
 
-let _builder = null;
-let _builderName = null;
+const _cache = new Map();
 
-export function getActiveBuilder(data) {
-  if (_builder && _builderName === ACTIVE) return _builder;
-  const factory = BUILDERS[ACTIVE];
-  if (!factory) throw new Error(`Unknown builder: ${ACTIVE}`);
-  _builder = factory(data);
-  _builderName = ACTIVE;
-  return _builder;
+// Resolve a builder name to its (cached) instance. Unknown / falsy
+// names quietly fall back so a stray request body can't crash board
+// generation.
+export function getBuilder(data, name = DEFAULT_BUILDER) {
+  const resolved = BUILDERS[name] ? name : DEFAULT_BUILDER;
+  if (_cache.has(resolved)) return _cache.get(resolved);
+  const builder = BUILDERS[resolved](data);
+  _cache.set(resolved, builder);
+  return builder;
 }
 
-// Test hook: forget the cached builder so the next getActiveBuilder()
-// rebuilds. Useful if a test wants to run with a custom data set.
-export function _resetActiveBuilder() {
-  _builder = null;
-  _builderName = null;
+// Coerce a user-supplied value into a known builder name (or fall
+// back). Centralized so route + session layers agree on the policy.
+export function normalizeBuilderName(name) {
+  return BUILDERS[name] ? name : DEFAULT_BUILDER;
+}
+
+// Test hook: forget all cached builders so the next getBuilder()
+// rebuilds. Useful when a test loads a custom data set.
+export function _resetBuilders() {
+  _cache.clear();
 }
 
 // --- Helpers ----------------------------------------------------------

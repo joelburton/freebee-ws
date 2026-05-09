@@ -156,6 +156,34 @@ describe("HomePage", () => {
     expect(body.center).toBe("r");
   });
 
+  it("solo posts the chosen builder; preference persists to localStorage", async () => {
+    mockFetch([
+      [() => true, async () => ({ ok: true, json: async () => fakeGame })],
+    ]);
+    const user = userEvent.setup();
+    render(<HomePage />);
+    const panel = within(
+      screen.getByRole("tabpanel", { name: "Solo" }),
+    );
+    await user.selectOptions(panel.getByLabelText("Letter variety"), "default");
+    await user.click(
+      panel.getByRole("button", { name: /Start with random letters/i }),
+    );
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(body.builder).toBe("default");
+    expect(window.localStorage.getItem("freebee:builder")).toBe("default");
+  });
+
+  it("solo defaults the builder to the saved preference on remount", async () => {
+    window.localStorage.setItem("freebee:builder", "default");
+    render(<HomePage />);
+    const panel = within(
+      screen.getByRole("tabpanel", { name: "Solo" }),
+    );
+    expect(panel.getByLabelText("Letter variety")).toHaveValue("default");
+  });
+
   it("Go button is disabled until both inputs are full", async () => {
     const user = userEvent.setup();
     render(<HomePage />);

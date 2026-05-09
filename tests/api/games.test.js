@@ -111,6 +111,33 @@ describe("POST /api/games (create)", () => {
     expect(data.revealList).toBeUndefined();
   });
 
+  it("honors the requested builder and surfaces it on the view", async () => {
+    const res = await app.fetch(
+      jsonReq("http://localhost/api/games", { builder: "default" }),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).builder).toBe("default");
+
+    const res2 = await app.fetch(
+      jsonReq("http://localhost/api/games", { builder: "diverse" }),
+    );
+    expect((await res2.json()).builder).toBe("diverse");
+  });
+
+  it("falls back to the default when builder is missing or unknown", async () => {
+    const omitted = await (
+      await app.fetch(jsonReq("http://localhost/api/games", {}))
+    ).json();
+    expect(omitted.builder).toBe("diverse");
+
+    const bogus = await (
+      await app.fetch(
+        jsonReq("http://localhost/api/games", { builder: "made-up" }),
+      )
+    ).json();
+    expect(bogus.builder).toBe("diverse");
+  });
+
   it("creates a custom game with full a-z available (incl. 's')", async () => {
     const res = await app.fetch(
       jsonReq("http://localhost/api/games", {

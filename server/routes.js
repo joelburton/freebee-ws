@@ -43,18 +43,29 @@ function withSession(c) {
 export function registerApiRoutes(app) {
   // POST /api/games — create a solo game (random or custom letters).
   // Multiplayer creation lives on POST /api/groups + the configure flow.
-  // Optional `previousLetters` (string of up to 7 chars, the prior solo
-  // game's letters + center) lets the BoardBuilder bias against repeats.
+  // Optional fields:
+  //   `previousLetters` — string of up to 7 chars, the prior solo game's
+  //     letters + center; lets the BoardBuilder bias against repeats.
+  //   `builder` — strategy name ("default" or "diverse"); unknown values
+  //     fall back to the default. Persisted on the session and surfaced
+  //     in clientView so the client can carry it forward.
   app.post("/api/games", async (c) => {
     const body = await safeJson(c);
-    const { letters, center, timerMode, countdownSeconds, previousLetters } =
-      body;
+    const {
+      letters,
+      center,
+      timerMode,
+      countdownSeconds,
+      previousLetters,
+      builder,
+    } = body;
     const opts = {
       timerMode:
         timerMode === "down" || timerMode === "none" ? timerMode : "up",
       countdownSeconds: Number.isFinite(countdownSeconds)
         ? Math.max(0, Math.floor(countdownSeconds))
         : 0,
+      builder,
     };
     if (typeof previousLetters === "string" && previousLetters.length > 0) {
       opts.previousMask = lettersToMask(previousLetters, "");

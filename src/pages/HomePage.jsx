@@ -3,14 +3,17 @@ import { Link, useNavigate } from "react-router-dom";
 import beeLogo from "../bee-logo.svg";
 import {
   clearSavedState,
+  loadSavedBuilder,
   loadSavedName,
   loadSavedState,
+  saveSavedBuilder,
   saveSavedName,
   saveState,
   takeBanner,
 } from "../components/storage";
 import { fetchGame, parseTime, postJson } from "../api";
 import {
+  BuilderField,
   CustomLettersForm,
   NameField,
   TimerControls,
@@ -30,6 +33,9 @@ export default function HomePage() {
   const [outerInput, setOuterInput] = useState("");
   const [timerMode, setTimerMode] = useState("none");
   const [countdownInput, setCountdownInput] = useState("5:00");
+  // BoardBuilder strategy preference. Persists across visits so a
+  // returning player doesn't have to re-pick.
+  const [builder, setBuilder] = useState(() => loadSavedBuilder());
 
   // "Play with friends" — just the host's name. Mode (co-op vs compete),
   // timer, and custom letters all get picked later, in the group's
@@ -85,8 +91,10 @@ export default function HomePage() {
       const data = await postJson("/api/games", {
         timerMode,
         countdownSeconds,
+        builder,
         ...extra,
       });
+      saveSavedBuilder(builder);
       saveState({ gameId: data.gameId });
       navigate(`/p/${data.gameId}`);
     } catch (e) {
@@ -217,6 +225,7 @@ export default function HomePage() {
                 countdown={countdownInput}
                 onCountdownChange={setCountdownInput}
               />
+              <BuilderField value={builder} onChange={setBuilder} />
               <div className="App-start-row">
                 <span className="App-start-row-label">Random letters</span>
                 <button

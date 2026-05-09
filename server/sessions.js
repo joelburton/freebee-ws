@@ -6,7 +6,12 @@ import {
   validateCustomLetters,
   scoreWord,
 } from "./game.js";
-import { getActiveBuilder, lettersToMask } from "./builders.js";
+import {
+  DEFAULT_BUILDER,
+  getBuilder,
+  lettersToMask,
+  normalizeBuilderName,
+} from "./builders.js";
 import { currentRankIndex } from "../shared/ranks.js";
 
 // ===========================================================================
@@ -192,6 +197,7 @@ function buildSession(board, opts, groupId) {
     countdownSeconds = 0,
     mode = "solo",
     targetRank,
+    builder = DEFAULT_BUILDER,
   } = opts;
   const now = Date.now();
   const isCompete = mode === "compete";
@@ -202,6 +208,10 @@ function buildSession(board, opts, groupId) {
     groupId, // null for solo
     mode,
     state: "active",
+    // Which BoardBuilder produced this puzzle. Carried across new-board
+    // and surfaced to the client so the next request can keep the same
+    // strategy without re-asking the user.
+    builder,
     foundBy: {}, // word → playerId (co-op attribution)
     letters: board.letters,
     center: board.center,
@@ -344,10 +354,14 @@ export function getMember(session, playerId) {
 // --- Creation ---
 
 export async function createRandomSession(opts = {}) {
-  const { previousMask = null, ...rest } = opts;
+  const { previousMask = null, builder: builderName, ...rest } = opts;
   const data = await loadData();
-  const builder = getActiveBuilder(data);
-  return createSession(rest, () => builder.next({ previousMask }), data);
+  const builder = getBuilder(data, builderName);
+  return createSession(
+    { ...rest, builder: builder.name },
+    () => builder.next({ previousMask }),
+    data,
+  );
 }
 
 export async function createCustomSession({ letters, center, ...opts }) {
@@ -484,6 +498,7 @@ export async function commitConfiguration(group, playerId, opts) {
   if (!canConfigure(group)) return { error: "Game in progress" };
   const data = await loadData();
   const { letters, center, ...rest } = opts || {};
+  const builderName = normalizeBuilderName(rest.builder);
   let board;
   if (letters !== undefined || center !== undefined) {
     const cerr = validateCustomLetters(letters, center);
@@ -493,7 +508,7 @@ export async function commitConfiguration(group, playerId, opts) {
       return { error: "No valid words for these letters" };
     }
   } else {
-    board = getActiveBuilder(data).next({
+    board = getBuilder(data, builderName).next({
       previousMask: previousMaskFromGroup(group),
     });
   }
@@ -505,6 +520,7 @@ export async function commitConfiguration(group, playerId, opts) {
       ? Math.max(0, Math.floor(rest.countdownSeconds))
       : 0,
     mode: rest.mode === "compete" ? "compete" : "multi",
+    builder: builderName,
     ...(Number.isInteger(rest.targetRank) ? { targetRank: rest.targetRank } : {}),
   };
   const session = buildSession(board, sessionOpts, group.id);
@@ -729,7 +745,8 @@ export async function newBoardFromSession(oldSession) {
     return oldSession;
   }
   const data = await loadData();
-  const board = getActiveBuilder(data).next({
+  const builderName = normalizeBuilderName(oldSession.builder);
+  const board = getBuilder(data, builderName).next({
     previousMask: lettersToMask(oldSession.letters, oldSession.center),
   });
   const now = Date.now();
@@ -738,6 +755,7 @@ export async function newBoardFromSession(oldSession) {
     groupId: group.id,
     mode: oldSession.mode,
     state: "active",
+    builder: builderName,
     foundBy: {},
     letters: board.letters,
     center: board.center,
@@ -867,6 +885,7 @@ export function clientView(session, viewerId = null) {
     total: session.total,
     timerMode: session.timerMode,
     countdownSeconds: session.countdownSeconds,
+    builder: session.builder ?? DEFAULT_BUILDER,
     found: session.found,
     bonusFound: session.bonusFound,
     score: session.score,

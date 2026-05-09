@@ -35,11 +35,14 @@ export default function SoloPage() {
   async function handleNewBoard() {
     try {
       // Carry the previous game's timer config (so we don't surprise
-      // the player with a different mode) and its letters (so the
-      // BoardBuilder can avoid too much overlap with the last board).
+      // the player with a different mode), the builder choice (so
+      // the player doesn't have to re-pick their preference each
+      // time), and the letters (so the BoardBuilder can avoid too
+      // much overlap with the last board).
       const data = await postJson("/api/games", {
         timerMode: game?.timerMode || "up",
         countdownSeconds: game?.countdownSeconds || 0,
+        ...(game?.builder ? { builder: game.builder } : {}),
         ...(game?.letters && game?.center
           ? { previousLetters: game.letters + game.center }
           : {}),

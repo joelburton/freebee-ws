@@ -119,6 +119,7 @@ describe("SoloPage", () => {
       ...baseSolo,
       timerMode: "down",
       countdownSeconds: 90,
+      builder: "default",
       ended: true,
       state: "ended",
       revealList: [],
@@ -146,9 +147,11 @@ describe("SoloPage", () => {
     expect(calls[0]).toEqual({
       timerMode: "down",
       countdownSeconds: 90,
-      // The previous board's letters + center, so the BoardBuilder can
-      // bias against too-similar successors.
+      // The previous board's letters + center (so the BoardBuilder can
+      // bias against too-similar successors) and its builder choice
+      // (so the player's preference sticks across new-board clicks).
       previousLetters: "bdeintr",
+      builder: "default",
     });
     expect(navigateMock).toHaveBeenCalledWith("/p/g2", { replace: true });
   });

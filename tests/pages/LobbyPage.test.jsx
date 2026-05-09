@@ -619,13 +619,44 @@ describe("LobbyPage configure flow", () => {
       ).toBe(true),
     );
     const commit = posted.find((p) => p.url === "/api/games/g1/configure/commit");
-    // Default draft is mode=multi, timerMode="none".
+    // Default draft is mode=multi, timerMode="none", builder="diverse".
     expect(commit.body).toMatchObject({
       playerId: "host-1",
       mode: "multi",
       timerMode: "none",
       countdownSeconds: 0,
+      builder: "diverse",
     });
+  });
+
+  it("changing the Letter variety select threads the chosen builder into the commit body", async () => {
+    asConfigurator();
+    const view = {
+      ...baseLobby,
+      state: "configuring",
+      configuring: { ownerId: "host-1", draft: null },
+    };
+    const posted = [];
+    configureMock(view, posted);
+    const user = userEvent.setup();
+    renderAt("g1");
+    await screen.findByRole("button", { name: "Start with random letters" });
+    await user.selectOptions(
+      screen.getByLabelText("Letter variety"),
+      "default",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Start with random letters" }),
+    );
+    await waitFor(() =>
+      expect(
+        posted.some((p) => p.url === "/api/games/g1/configure/commit"),
+      ).toBe(true),
+    );
+    const commit = posted.find(
+      (p) => p.url === "/api/games/g1/configure/commit",
+    );
+    expect(commit.body.builder).toBe("default");
   });
 
   it("commit (compete + targetRank) threads targetRank through, omits countdownSeconds", async () => {

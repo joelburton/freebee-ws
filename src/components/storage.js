@@ -86,3 +86,30 @@ export function saveSavedName(name) {
     // ignore
   }
 }
+
+// Builder (BoardBuilder strategy) preference — survives across sessions
+// so a returning player doesn't have to re-pick. "diverse" is the
+// server default; treat any unknown stored value as that.
+const BUILDER_KEY = "freebee:builder";
+const KNOWN_BUILDERS = new Set(["default", "diverse"]);
+
+export function loadSavedBuilder() {
+  if (typeof window === "undefined") return "diverse";
+  try {
+    const v = window.localStorage.getItem(BUILDER_KEY);
+    return KNOWN_BUILDERS.has(v) ? v : "diverse";
+  } catch {
+    return "diverse";
+  }
+}
+
+export function saveSavedBuilder(name) {
+  if (typeof window === "undefined") return;
+  try {
+    if (KNOWN_BUILDERS.has(name)) {
+      window.localStorage.setItem(BUILDER_KEY, name);
+    }
+  } catch {
+    // ignore
+  }
+}

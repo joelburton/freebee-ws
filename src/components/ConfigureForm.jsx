@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { parseTime, postJson } from "../api";
-import { CustomLettersForm, EndCondition, TimerControls } from "./setupFields";
+import {
+  BuilderField,
+  CustomLettersForm,
+  EndCondition,
+  TimerControls,
+} from "./setupFields";
 
 const DEFAULT_TARGET_RANK = 6;
 
@@ -15,6 +20,7 @@ const DEFAULT_DRAFT = {
   targetRankCompete: DEFAULT_TARGET_RANK,
   centerInput: "",
   outerInput: "",
+  builder: "diverse",
 };
 
 function mergeDraft(base, override) {
@@ -88,7 +94,12 @@ export default function ConfigureForm({
 
   async function commit(extra = {}) {
     onError("");
-    const body = { playerId, mode: draft.mode, ...extra };
+    const body = {
+      playerId,
+      mode: draft.mode,
+      builder: draft.builder,
+      ...extra,
+    };
     if (draft.mode === "compete") {
       if (draft.endModeCompete === "down") {
         const cs = ensureCountdown("down", draft.countdownInputCompete);
@@ -175,6 +186,12 @@ export default function ConfigureForm({
           disabled={readOnly}
         />
       )}
+
+      <BuilderField
+        value={draft.builder}
+        onChange={(v) => setField("builder", v)}
+        disabled={readOnly}
+      />
 
       {!readOnly && (
         <div className="App-start-row">

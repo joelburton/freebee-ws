@@ -7,9 +7,13 @@ import {
   processWords,
 } from "../server/game.js";
 import {
+  DEFAULT_BUILDER,
+  _resetBuilders,
   createDefaultBuilder,
   createDiverseBuilder,
+  getBuilder,
   lettersToMask,
+  normalizeBuilderName,
 } from "../server/builders.js";
 
 // Real word lists drive these tests so we exercise the full pipeline
@@ -129,6 +133,36 @@ describe("BoardBuilder shape", () => {
     expect(div.name).toBe("diverse");
     expect(typeof def.next).toBe("function");
     expect(typeof div.next).toBe("function");
+  });
+});
+
+describe("getBuilder + normalizeBuilderName", () => {
+  beforeEach(() => _resetBuilders());
+
+  it("returns the named builder when known", async () => {
+    const data = await dataPromise;
+    expect(getBuilder(data, "default").name).toBe("default");
+    expect(getBuilder(data, "diverse").name).toBe("diverse");
+  });
+
+  it("falls back to DEFAULT_BUILDER for unknown / missing names", async () => {
+    const data = await dataPromise;
+    expect(getBuilder(data, undefined).name).toBe(DEFAULT_BUILDER);
+    expect(getBuilder(data, null).name).toBe(DEFAULT_BUILDER);
+    expect(getBuilder(data, "made-up").name).toBe(DEFAULT_BUILDER);
+  });
+
+  it("caches: same name returns the same instance", async () => {
+    const data = await dataPromise;
+    expect(getBuilder(data, "diverse")).toBe(getBuilder(data, "diverse"));
+    expect(getBuilder(data, "default")).toBe(getBuilder(data, "default"));
+  });
+
+  it("normalizeBuilderName accepts known, falls back otherwise", () => {
+    expect(normalizeBuilderName("default")).toBe("default");
+    expect(normalizeBuilderName("diverse")).toBe("diverse");
+    expect(normalizeBuilderName(undefined)).toBe(DEFAULT_BUILDER);
+    expect(normalizeBuilderName("nonsense")).toBe(DEFAULT_BUILDER);
   });
 });
 

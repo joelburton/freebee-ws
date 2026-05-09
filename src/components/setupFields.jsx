@@ -135,6 +135,28 @@ export function TimerControls({
   );
 }
 
+// Letter-variety picker for the BoardBuilder. "diverse" is the default
+// (rare letters more often, less overlap with the previous board);
+// "default" is the original uniform-random algorithm. Provided so the
+// game creator can A/B the feel — kept compact since it's a power-user
+// knob, not the main flow.
+export function BuilderField({ value, onChange, disabled = false }) {
+  return (
+    <label className="App-start-field App-start-field-wide">
+      <span>Letter variety</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        aria-label="Letter variety"
+      >
+        <option value="diverse">More variety (default)</option>
+        <option value="default">Classic</option>
+      </select>
+    </label>
+  );
+}
+
 // Compete-only end-condition picker: countdown M:SS OR first to one of
 // the top three ranks. Same out-of-tab-order treatment as TimerControls.
 export function EndCondition({
