@@ -143,6 +143,15 @@ export default function WordList({
   );
   const navHidden = totalPages <= 1;
 
+  // Re-sync `page` to `safePage` after totalPages shrinks (e.g., the
+  // word list collapses post-end on compete). Without this, page would
+  // hold its stale unclamped value and the user would jump back to it
+  // when the list grew again.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
+
   // Surface pagination state so a parent can render its own nav (e.g., on
   // the Game's action bar). `setPage` is React useState's stable setter.
   useEffect(() => {

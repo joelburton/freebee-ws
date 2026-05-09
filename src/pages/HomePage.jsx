@@ -20,7 +20,10 @@ export default function HomePage() {
   const navigate = useNavigate();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [banner, setBanner] = useState(null);
+  // One-shot banner from a redirect (e.g. /g/<bad>). takeBanner reads
+  // and clears in one step, so the lazy initializer captures it on
+  // mount without needing an effect.
+  const [banner, setBanner] = useState(() => takeBanner());
 
   // Solo card state.
   const [centerInput, setCenterInput] = useState("");
@@ -38,12 +41,6 @@ export default function HomePage() {
   const [savedGame, setSavedGame] = useState(null);
   // Active tab: "solo" or "friends".
   const [activeTab, setActiveTab] = useState("solo");
-
-  // One-shot banner from a redirect (e.g. /g/<bad>).
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBanner(takeBanner());
-  }, []);
 
   useEffect(() => {
     const saved = loadSavedState();

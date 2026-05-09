@@ -357,6 +357,9 @@ export default function Game({
   }
 
   function handleShuffle() {
+    // Intentionally ungated by `locked` (unlike handleDelete /
+    // handleLetterClick): shuffling stays available post-end so a
+    // player reviewing the board can rearrange the letters at will.
     setOuterLetters((ls) => shuffle(ls));
   }
 
