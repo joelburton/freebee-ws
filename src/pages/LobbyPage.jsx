@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import beeLogo from "../bee-logo.svg";
 import {
   clearSavedState,
   loadSavedName,
@@ -216,7 +217,10 @@ export default function LobbyPage() {
   const siteHeader = (
     <header className="App-header">
       <h1>
-        <Link to="/">Freebee</Link>
+        <Link to="/">
+          <img src={beeLogo} className="BeeTitle-logo" alt="" aria-hidden="true" />
+          Freebee
+        </Link>
       </h1>
     </header>
   );

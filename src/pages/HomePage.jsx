@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import beeLogo from "../bee-logo.svg";
 import {
   clearSavedState,
   loadSavedName,
@@ -138,7 +139,10 @@ export default function HomePage() {
     <div className="App-start">
       <header className="App-header App-header-home">
         <h1>
-          <Link to="/">Freebee</Link>
+          <Link to="/">
+            <img src={beeLogo} className="BeeTitle-logo" alt="" aria-hidden="true" />
+            Freebee
+          </Link>
         </h1>
       </header>
       {banner && (

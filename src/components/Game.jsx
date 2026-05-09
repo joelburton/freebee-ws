@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import beeLogo from "../bee-logo.svg";
 import Letters from "./Letters";
 import Feedback from "./Feedback";
 import WordList from "./WordList";
@@ -444,7 +445,10 @@ export default function Game({
     <div className="Game">
       <div className="Game-board">
         <header className="Game-title">
-          <h1>Freebee</h1>
+          <h1>
+            <img src={beeLogo} className="BeeTitle-logo" alt="" aria-hidden="true" />
+            Freebee
+          </h1>
         </header>
         <form
           className={`Game-form${locked ? " is-locked" : ""}${
