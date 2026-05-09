@@ -44,14 +44,6 @@ describe("Chat", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("clicking × calls onTabAway so the word input regains focus", async () => {
-    const user = userEvent.setup();
-    const onTabAway = vi.fn();
-    renderChat({ onTabAway });
-    await user.click(screen.getByRole("button", { name: "Chat" }));
-    await user.click(screen.getByRole("button", { name: "Close chat" }));
-    expect(onTabAway).toHaveBeenCalledTimes(1);
-  });
 
   it("clicking the chat button focuses the message input", async () => {
     const user = userEvent.setup();
@@ -143,15 +135,14 @@ describe("Chat", () => {
     expect(btn.style.cssText).toBe("");
   });
 
-  it("Tab from chat input fires onTabAway", async () => {
+  it("Tab from chat input closes the popover", async () => {
     const user = userEvent.setup();
-    const onTabAway = vi.fn();
-    renderChat({ onTabAway });
+    renderChat();
     await user.click(screen.getByRole("button", { name: "Chat" }));
     const input = screen.getByPlaceholderText("Type a message");
     input.focus();
     await user.keyboard("{Tab}");
-    expect(onTabAway).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("important messages render with the bold modifier class", async () => {

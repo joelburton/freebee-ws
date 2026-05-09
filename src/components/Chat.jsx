@@ -34,7 +34,7 @@ function saveReadCount(playerId, count) {
 }
 
 const Chat = forwardRef(function Chat(
-  { gameId, playerId, players, messages, onTabAway },
+  { gameId, playerId, players, messages },
   ref,
 ) {
   const [open, setOpen] = useState(false);
@@ -173,7 +173,7 @@ const Chat = forwardRef(function Chat(
   function handleInputKeyDown(e) {
     if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
-      onTabAway?.();
+      setOpen(false);
     } else if (e.key === "Escape") {
       setOpen(false);
     }
@@ -217,16 +217,7 @@ const Chat = forwardRef(function Chat(
             <button
               type="button"
               className="Chat-close"
-              onClick={() => {
-                setOpen(false);
-                // Hand focus back to the word input — closing the chat
-                // is conceptually the same as Tab-away. Skip on phone:
-                // focusing the input pops the on-screen keyboard, which
-                // covers the board the player wanted to get back to.
-                if (!window.matchMedia("(max-width: 759px)").matches) {
-                  onTabAway?.();
-                }
-              }}
+              onClick={() => setOpen(false)}
               aria-label="Close chat"
             >
               ×

@@ -93,8 +93,7 @@ function mockServer({ submit = {}, end, pause, resume } = {}) {
 function setup(overrides = {}) {
   const user = userEvent.setup();
   const utils = render(<Game game={{ ...mockGame, ...overrides }} />);
-  const input = screen.getByPlaceholderText("Type or click");
-  return { user, input, ...utils };
+  return { user, ...utils };
 }
 
 beforeEach(() => {
@@ -167,12 +166,10 @@ describe("Game · multiplayer awareness", () => {
     expect(trident.style.color).toBe("rgb(230, 74, 25)"); // #e64a19
   });
 
-  it("Tab from word input opens the chat popover and focuses its input", async () => {
+  it("Tab opens the chat popover and focuses its input", async () => {
     mockServer();
     const user = userEvent.setup();
     render(<Game game={multiGame} playerId="p-host" />);
-    const wordInput = screen.getByPlaceholderText("Type or click");
-    wordInput.focus();
     await user.keyboard("{Tab}");
     // Popover open, chat input focused.
     expect(screen.getByRole("dialog", { name: "Chat" })).toBeInTheDocument();
@@ -350,8 +347,8 @@ describe("Game submit flow", () => {
         },
       },
     });
-    const { user, input } = setup();
-    await user.type(input, "tribe{Enter}");
+    const { user } = setup();
+    await user.keyboard("tribe{Enter}");
     expect(global.fetch).toHaveBeenCalledWith(
       "/api/games/g1/submit",
       expect.objectContaining({ method: "POST" }),
@@ -375,8 +372,8 @@ describe("Game submit flow", () => {
         },
       },
     });
-    const { user, input } = setup();
-    await user.type(input, "interbred{Enter}");
+    const { user } = setup();
+    await user.keyboard("interbred{Enter}");
     expect(screen.getByText("INTERBRED: Pangram! +19")).toHaveClass(
       "Feedback-success",
     );
@@ -397,8 +394,8 @@ describe("Game submit flow", () => {
         },
       },
     });
-    const { user, input, container } = setup();
-    await user.type(input, "birder{Enter}");
+    const { user, container } = setup();
+    await user.keyboard("birder{Enter}");
     const li = [...container.querySelectorAll(".WordList li")].find((el) =>
       el.textContent.startsWith("birder"),
     );
@@ -415,8 +412,8 @@ describe("Game submit flow", () => {
     ];
     for (const c of cases) {
       mockServer({ submit: { [c.word]: { result: c.result } } });
-      const { user, input, unmount } = setup();
-      await user.type(input, `${c.word}{Enter}`);
+      const { user, unmount } = setup();
+      await user.keyboard(`${c.word}{Enter}`);
       expect(screen.getByText(c.match)).toHaveClass(`Feedback-${c.klass}`);
       unmount();
     }
@@ -424,16 +421,16 @@ describe("Game submit flow", () => {
 
   it("renders alreadyFound as warning", async () => {
     mockServer({ submit: { tribe: { result: "alreadyFound" } } });
-    const { user, input } = setup();
-    await user.type(input, "tribe{Enter}");
+    const { user } = setup();
+    await user.keyboard("tribe{Enter}");
     expect(screen.getByText(/Already found/i)).toHaveClass("Feedback-warning");
   });
 
-  it("greys illegal letters in the input overlay", async () => {
+  it("greys illegal letters in the word display", async () => {
     mockServer();
-    const { user, input, container } = setup();
-    await user.type(input, "qb");
-    const spans = container.querySelectorAll(".WordInput-overlay span");
+    const { user, container } = setup();
+    await user.keyboard("qb");
+    const spans = container.querySelectorAll(".WordInput span");
     expect(spans).toHaveLength(2);
     expect(spans[0]).toHaveTextContent("Q");
     expect(spans[0]).toHaveClass("WordInput-illegal");
@@ -455,9 +452,9 @@ describe("Game submit flow", () => {
         },
       },
     });
-    const { user, input, container } = setup();
+    const { user, container } = setup();
     expect(container.textContent).toMatch(/0\s*\/\s*50/);
-    await user.type(input, "tribe{Enter}");
+    await user.keyboard("tribe{Enter}");
     const sideText = container.querySelector(".Game-side").textContent;
     expect(sideText).toMatch(/5\s*\/\s*50/);
     expect(sideText).toMatch(/1\s*\/\s*4/);
@@ -473,22 +470,24 @@ describe("Game interactions", () => {
     }
   });
 
-  it("clicking a hex letter appends to the input", async () => {
+  it("clicking a hex letter appends to the word display", async () => {
     mockServer();
-    const { user, input } = setup();
+    const { user, container } = setup();
+    const wordDisplay = container.querySelector(".WordInput");
     await user.click(screen.getByText("B"));
-    expect(input).toHaveValue("B");
+    expect(wordDisplay).toHaveTextContent("B");
     await user.click(screen.getByText("R"));
-    expect(input).toHaveValue("BR");
+    expect(wordDisplay).toHaveTextContent("BR");
   });
 
   it("Delete button removes the last character", async () => {
     mockServer();
-    const { user, input } = setup();
-    await user.type(input, "abc");
-    expect(input).toHaveValue("ABC");
+    const { user, container } = setup();
+    const wordDisplay = container.querySelector(".WordInput");
+    await user.keyboard("abc");
+    expect(wordDisplay).toHaveTextContent("ABC");
     await user.click(screen.getByRole("button", { name: "Delete" }));
-    expect(input).toHaveValue("AB");
+    expect(wordDisplay).toHaveTextContent("AB");
   });
 
   it("Shuffle button keeps the same 6 outer letters", async () => {
@@ -555,16 +554,14 @@ describe("Game interactions", () => {
         score: 0,
       },
     });
-    render(
+    const { container } = render(
       <Game game={{ ...mockGame, timerMode: "down", countdownSeconds: 0 }} />,
     );
     // Once ended, End-game button disappears and New board / New setup take its place.
     await screen.findByRole("button", { name: /New board/i });
     expect(screen.queryByRole("button", { name: /End game/i })).toBeNull();
     expect(screen.getByText(/Time's up/)).toBeInTheDocument();
-    // Once ended the placeholder is dropped (the input is locked, so
-    // "Type or click" was misleading); find the input by role instead.
-    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(container.querySelector(".Game-form")).toHaveClass("is-locked");
     expect(global.fetch).toHaveBeenCalledWith(
       "/api/games/g1/end",
       expect.objectContaining({ method: "POST" }),
@@ -580,7 +577,7 @@ describe("Game interactions", () => {
         score: 0,
       },
     });
-    const { user, input, container } = setup();
+    const { user, container } = setup();
     // Empty state renders one placeholder <li> ("No words yet") so the
     // box height stays constant.
     expect(
@@ -592,7 +589,7 @@ describe("Game interactions", () => {
       ".WordList li:not(.WordList-empty)",
     );
     expect(items).toHaveLength(4);
-    expect(input).toBeDisabled();
+    expect(container.querySelector(".Game-form")).toHaveClass("is-locked");
     // After ending: action bar swaps from End-game to New-board / New-setup.
     expect(screen.queryByRole("button", { name: /End game/i })).toBeNull();
     expect(
@@ -633,17 +630,15 @@ describe("Game interactions", () => {
     expect(onResetSetup).toHaveBeenCalledTimes(1);
   });
 
-  it("pause disables input and blurs board/word list", async () => {
+  it("pause blurs board and word list", async () => {
     const user = userEvent.setup();
     const { container } = render(<Game game={mockGame} />);
-    const input = screen.getByPlaceholderText("Type or click");
+    const form = container.querySelector(".Game-form");
     await user.click(screen.getByRole("button", { name: "Pause" }));
-    expect(input).toBeDisabled();
-    expect(input.closest("form")).toHaveClass("is-blurred");
+    expect(form).toHaveClass("is-blurred");
     expect(container.querySelector(".Game-side .is-blurred")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "Resume" }));
-    expect(input).not.toBeDisabled();
-    expect(input.closest("form")).not.toHaveClass("is-blurred");
+    expect(form).not.toHaveClass("is-blurred");
   });
 
   describe("compete mode", () => {

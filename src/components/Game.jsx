@@ -88,8 +88,8 @@ export default function Game({
   const feedback = timeUp
     ? { message: "Time's up!", type: "error" }
     : submitFeedback;
-  const inputRef = useRef(null);
   const chatRef = useRef(null);
+  const keyHandlerRef = useRef(null);
   const submitting = useRef(false);
   const togglingPause = useRef(false);
   // Pagination state surfaced from <WordList> via its onPagination prop;
@@ -217,6 +217,41 @@ export default function Game({
     },
     [],
   );
+
+  // Global keydown handler — captures letter/backspace/enter/tab so the
+  // player never has to click a focused input first. Skips events that
+  // originate from an input or textarea (e.g. the chat box).
+  keyHandlerRef.current = (e) => {
+    if (locked) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (e.key === "Tab" && !e.shiftKey && chatRef.current) {
+      e.preventDefault();
+      chatRef.current.openAndFocus();
+    } else if (e.key === "Backspace") {
+      e.preventDefault();
+      setWord((w) => w.slice(0, -1));
+    } else if (e.key === "Enter") {
+      if (!word) return;
+      tryWord(word);
+      setWord("");
+    } else if (
+      e.key.length === 1 &&
+      /[a-zA-Z]/.test(e.key) &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey
+    ) {
+      setWord((w) => w + e.key.toUpperCase());
+    }
+  };
+  useEffect(() => {
+    function handler(e) {
+      keyHandlerRef.current(e);
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Server is authoritative for game state. Solo persists just the
   // gameId; multi persists {gameId, playerId} so a refresh of /g/<id>
@@ -375,25 +410,6 @@ export default function Game({
     if (locked || !word) return;
     tryWord(word);
     setWord("");
-    // On touch devices we deliberately skip refocusing the input —
-    // focusing it pops up the soft keyboard, and touch users are most
-    // likely entering letters via the on-screen hex buttons. On desktop
-    // (mouse/keyboard), restore focus so they can keep typing or tab.
-    if (
-      typeof window !== "undefined" &&
-      !window.matchMedia?.("(pointer: coarse)").matches
-    ) {
-      inputRef.current?.focus();
-    }
-  }
-
-  // Tab from the word input pops chat open (or just refocuses if already
-  // open) so the player doesn't need to mouse to the chat button.
-  function handleWordKeyDown(evt) {
-    if (evt.key === "Tab" && !evt.shiftKey && chatRef.current) {
-      evt.preventDefault();
-      chatRef.current.openAndFocus();
-    }
   }
 
   function handleLetterClick(letter) {
@@ -433,21 +449,9 @@ export default function Game({
           onSubmit={handleSubmit}
         >
           <div className="Game-input">
-            <div className="WordInput">
-              <input
-                ref={inputRef}
-                className="Form-wordInput"
-                value={word}
-                onChange={(e) => setWord(e.target.value.toUpperCase())}
-                onKeyDown={handleWordKeyDown}
-                autoFocus
-                spellCheck={false}
-                autoComplete="off"
-                placeholder={displayEnded ? "Game over" : "Type or click"}
-                disabled={locked}
-              />
-              <div className="WordInput-overlay" aria-hidden="true">
-                {word.split("").map((ch, i) => (
+            <div className="WordInput" aria-live="polite" aria-label="Current word">
+              {word.length > 0 ? (
+                word.split("").map((ch, i) => (
                   <span
                     key={i}
                     className={
@@ -456,8 +460,12 @@ export default function Game({
                   >
                     {ch}
                   </span>
-                ))}
-              </div>
+                ))
+              ) : (
+                <span className="WordInput-placeholder">
+                  {displayEnded ? "Game over" : "Type or click"}
+                </span>
+              )}
             </div>
             <Feedback message={feedback.message} type={feedback.type} />
           </div>
@@ -503,7 +511,6 @@ export default function Game({
             playerId={playerId}
             players={players}
             messages={messages}
-            onTabAway={() => inputRef.current?.focus()}
           />
         )}
       </div>

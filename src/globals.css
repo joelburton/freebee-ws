@@ -672,55 +672,27 @@ code {
    caret; the overlay renders each character with optional
    .WordInput-illegal styling. */
 .WordInput {
-  position: relative;
   width: 100%;
   max-width: 360px;
-}
-
-.Form-wordInput {
-  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
   font-size: 22px;
   font-weight: 800;
   text-align: center;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  outline: none;
-  /* Hide the input's own text — the overlay paints it instead. */
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  caret-color: #111;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.Form-wordInput::placeholder {
-  color: #b8b8b8;
-  -webkit-text-fill-color: #b8b8b8;
-  opacity: 1;
-}
-
-.Form-wordInput:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(247, 217, 43, 0.3);
-}
-
-/* Painted on top of .Form-wordInput, character by character. */
-.WordInput-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  padding: 14px 16px;
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
   color: #111;
+  min-height: 54px;
+  user-select: none;
+}
+
+.WordInput-placeholder {
+  color: #b8b8b8;
 }
 
 /* Per-character class added by Game.jsx for letters not in the puzzle. */
@@ -1802,10 +1774,11 @@ code {
     gap: 0;
   }
 
-  /* Less internal padding on the input itself — desktop's 14px feels
+  /* Less internal padding on the word display — desktop's 14px feels
      bloated on phone where vertical space is at a premium. */
-  .Form-wordInput {
+  .WordInput {
     padding: 8px 12px;
+    min-height: 38px;
   }
 
   /* Hex grid: another ~15% bigger (0.97 → 1.12). `zoom` reduces (or
